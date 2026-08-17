@@ -1,0 +1,111 @@
+import ollama
+
+from memory import init_db, save_memory, get_recent_memories
+
+
+MODEL = "phi3:mini"
+
+EXIT_COMMANDS = {
+    "exit",
+    "quit",
+    "bye",
+    "/bye",
+}
+
+
+def build_context():
+    memories = get_recent_memories(limit=10)
+
+    if not memories:
+        return []
+
+    context = []
+
+    # Database newest-first hota hai.
+    # AI ko conversation chronological order mein denge.
+    for user_message, assistant_response in reversed(memories):
+        context.append(
+            {
+                "role": "user",
+                "content": user_message,
+            }
+        )
+
+        context.append(
+            {
+                "role": "assistant",
+                "content": assistant_response,
+            }
+        )
+
+    return context
+
+
+def ask_ultron(user_input):
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are Ultron, a helpful personal AI assistant. "
+                "Use the conversation context to answer questions. "
+                "Be concise and natural. "
+                "Do not invent information."
+            ),
+        }
+    ]
+
+    messages.extend(build_context())
+
+    messages.append(
+        {
+            "role": "user",
+            "content": user_input,
+        }
+    )
+
+    response = ollama.chat(
+        model=MODEL,
+        messages=messages,
+    )
+
+    return response["message"]["content"]
+
+
+def main():
+    init_db()
+
+    print("\n🤖 CyberJarvis AI")
+    print("Persistent memory: ON")
+    print("Type 'exit', 'quit', 'bye', or '/bye' to quit.\n")
+
+    while True:
+        try:
+            user_input = input("You: ").strip()
+
+        except (KeyboardInterrupt, EOFError):
+            print("\nUltron: Goodbye.")
+            break
+
+        if not user_input:
+            continue
+
+        if user_input.lower() in EXIT_COMMANDS:
+            print("Ultron: Goodbye.")
+            break
+
+        try:
+            print("Ultron: ", end="", flush=True)
+
+            answer = ask_ultron(user_input)
+
+            print(answer)
+            print()
+
+            save_memory(user_input, answer)
+
+        except Exception as error:
+            print(f"\n❌ Error: {error}\n")
+
+
+if __name__ == "__main__":
+    main()
