@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 .env
 cyberjarvis.db
+
+# Step backups and generated docs
+main.py.step*-backup
+Step5C_*.docx
+Step5C_*.pdf
