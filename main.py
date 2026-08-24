@@ -1,5 +1,5 @@
+import re
 import ollama
-
 from memory import init_db, save_memory, get_recent_memories
 from services.tool_dispatcher import run_tool
 
@@ -53,6 +53,43 @@ def detect_system_tool(text: str):
         return "disk"
 
     return None
+
+
+def detect_file_tool(text: str):
+    """
+    Detect safe read-only project file requests.
+
+    Returns:
+        ("list_files", None)
+        ("read_file", filename)
+        or (None, None)
+    """
+
+    text_lower = text.lower().strip()
+
+    list_keywords = [
+        "list files",
+        "show files",
+        "what files",
+        "which files",
+        "files in my project",
+        "project files",
+        "files in cyberjarvis",
+    ]
+
+    if any(keyword in text_lower for keyword in list_keywords):
+        return "list_files", None
+
+    match = re.search(
+        r"\b(?:read|show|open|display|contents?\s+of)\s+([A-Za-z0-9_./-]+)",
+        text_lower,
+    )
+
+    if match:
+        filename = match.group(1).removeprefix("./")
+        return "read_file", filename
+
+    return None, None
 
 
 def build_context():
@@ -127,6 +164,34 @@ def format_system_result(tool_name, result):
     return str(result)
 
 
+def format_file_result(tool_name, result):
+    if isinstance(result, dict) and "error" in result:
+        return f"I couldn't access that file: {result['error']}"
+
+    if tool_name == "list_files":
+        if not result:
+            return "The CyberJarvis project directory is empty."
+
+        lines = []
+
+        for item in result:
+            icon = "📁" if item["type"] == "directory" else "📄"
+            lines.append(f"{icon} {item['name']}")
+
+        return "Files in the CyberJarvis project:\n" + "\n".join(lines)
+
+    if tool_name == "read_file":
+        content = result.get("content", "")
+        max_chars = 12000
+
+        if len(content) > max_chars:
+            content = content[:max_chars] + "\n\n[Output truncated for safety.]"
+
+        return f"Contents of {result['filename']}:\n\n{content}"
+
+    return str(result)
+
+
 def main():
     init_db()
 
@@ -151,29 +216,34 @@ def main():
             break
 
         try:
-            # --------------------------------
-            # STEP 4C: TOOL ROUTING
-            # --------------------------------
+            system_tool = detect_system_tool(user_input)
 
-            tool_name = detect_system_tool(user_input)
-
-            if tool_name:
+            if system_tool:
                 print("Ultron: Checking system...")
 
-                result = run_tool(tool_name)
+                result = run_tool(system_tool)
 
                 if isinstance(result, dict) and "error" in result:
                     answer = f"I couldn't check that: {result['error']}"
                 else:
-                    answer = format_system_result(tool_name, result)
+                    answer = format_system_result(system_tool, result)
 
             else:
-                # --------------------------------
-                # NORMAL AI REQUEST
-                # --------------------------------
+                file_tool, filename = detect_file_tool(user_input)
 
-                print("Ultron: ", end="", flush=True)
-                answer = ask_ultron(user_input)
+                if file_tool:
+                    print("Ultron: Checking project files...")
+
+                    if file_tool == "read_file":
+                        result = run_tool(file_tool, filename)
+                    else:
+                        result = run_tool(file_tool)
+
+                    answer = format_file_result(file_tool, result)
+
+                else:
+                    print("Ultron: ", end="", flush=True)
+                    answer = ask_ultron(user_input)
 
             print(answer)
             print()
