@@ -14,6 +14,52 @@ EXIT_COMMANDS = {
 }
 
 
+def detect_action_tool(text: str):
+    """
+    Detect safe read-only local action requests.
+
+    Returns:
+        "get_time", "get_date", "get_current_directory"
+        or None
+    """
+
+    text_lower = text.lower().strip()
+
+    time_keywords = [
+        "what time is it",
+        "current time",
+        "tell me the time",
+        "time now",
+    ]
+
+    date_keywords = [
+        "what is today's date",
+        "what is the date",
+        "current date",
+        "today's date",
+        "date today",
+    ]
+
+    directory_keywords = [
+        "current directory",
+        "where am i",
+        "what directory am i in",
+        "working directory",
+        "current folder",
+    ]
+
+    if any(keyword in text_lower for keyword in time_keywords):
+        return "get_time"
+
+    if any(keyword in text_lower for keyword in date_keywords):
+        return "get_date"
+
+    if any(keyword in text_lower for keyword in directory_keywords):
+        return "get_current_directory"
+
+    return None
+
+
 def detect_system_tool(text: str):
     """
     Detect simple system-monitoring requests.
@@ -192,6 +238,22 @@ def format_file_result(tool_name, result):
     return str(result)
 
 
+def format_action_result(tool_name, result):
+    if isinstance(result, dict) and "error" in result:
+        return f"I couldn't perform that action: {result['error']}"
+
+    if tool_name == "get_time":
+        return f"The current time is {result}."
+
+    if tool_name == "get_date":
+        return f"Today is {result}."
+
+    if tool_name == "get_current_directory":
+        return f"The current directory is {result}."
+
+    return str(result)
+
+
 def main():
     init_db()
 
@@ -242,8 +304,17 @@ def main():
                     answer = format_file_result(file_tool, result)
 
                 else:
-                    print("Ultron: ", end="", flush=True)
-                    answer = ask_ultron(user_input)
+                    action_tool = detect_action_tool(user_input)
+
+                    if action_tool:
+                        print("Ultron: Checking...")
+
+                        result = run_tool(action_tool)
+                        answer = format_action_result(action_tool, result)
+
+                    else:
+                        print("Ultron: ", end="", flush=True)
+                        answer = ask_ultron(user_input)
 
             print(answer)
             print()
