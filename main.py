@@ -2,6 +2,7 @@ import re
 import ollama
 from memory import init_db, save_memory, get_recent_memories
 from services.tool_dispatcher import run_tool
+from services.intent_router import route_intent
 
 
 MODEL = "phi3:mini"
@@ -279,8 +280,12 @@ def main():
 
         try:
             system_tool = detect_system_tool(user_input)
+            file_tool, filename = detect_file_tool(user_input)
+            action_tool = detect_action_tool(user_input)
 
-            if system_tool:
+            intent = route_intent(system_tool, file_tool, action_tool)
+
+            if intent == "system":
                 print("Ultron: Checking system...")
 
                 result = run_tool(system_tool)
@@ -290,31 +295,25 @@ def main():
                 else:
                     answer = format_system_result(system_tool, result)
 
-            else:
-                file_tool, filename = detect_file_tool(user_input)
+            elif intent == "file":
+                print("Ultron: Checking project files...")
 
-                if file_tool:
-                    print("Ultron: Checking project files...")
-
-                    if file_tool == "read_file":
-                        result = run_tool(file_tool, filename)
-                    else:
-                        result = run_tool(file_tool)
-
-                    answer = format_file_result(file_tool, result)
-
+                if file_tool == "read_file":
+                    result = run_tool(file_tool, filename)
                 else:
-                    action_tool = detect_action_tool(user_input)
+                    result = run_tool(file_tool)
 
-                    if action_tool:
-                        print("Ultron: Checking...")
+                answer = format_file_result(file_tool, result)
 
-                        result = run_tool(action_tool)
-                        answer = format_action_result(action_tool, result)
+            elif intent == "action":
+                print("Ultron: Checking...")
 
-                    else:
-                        print("Ultron: ", end="", flush=True)
-                        answer = ask_ultron(user_input)
+                result = run_tool(action_tool)
+                answer = format_action_result(action_tool, result)
+
+            else:
+                print("Ultron: ", end="", flush=True)
+                answer = ask_ultron(user_input)
 
             print(answer)
             print()
