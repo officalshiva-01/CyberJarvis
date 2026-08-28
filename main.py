@@ -3,6 +3,7 @@ import ollama
 from memory import init_db, save_memory, get_recent_memories
 from services.tool_dispatcher import run_tool
 from services.intent_router import route_intent
+from services.tool_selector import select_tool
 
 
 MODEL = "phi3:mini"
@@ -284,8 +285,9 @@ def main():
             action_tool = detect_action_tool(user_input)
 
             intent = route_intent(system_tool, file_tool, action_tool)
+            selected_tool = select_tool(intent)
 
-            if intent == "system":
+            if selected_tool == "system":
                 print("Ultron: Checking system...")
 
                 result = run_tool(system_tool)
@@ -295,7 +297,7 @@ def main():
                 else:
                     answer = format_system_result(system_tool, result)
 
-            elif intent == "file":
+            elif selected_tool == "file":
                 print("Ultron: Checking project files...")
 
                 if file_tool == "read_file":
@@ -305,7 +307,7 @@ def main():
 
                 answer = format_file_result(file_tool, result)
 
-            elif intent == "action":
+            elif selected_tool == "action":
                 print("Ultron: Checking...")
 
                 result = run_tool(action_tool)
