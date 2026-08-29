@@ -5,8 +5,12 @@ from pathlib import Path
 DB_PATH = Path(__file__).parent / "cyberjarvis.db"
 
 
+def get_connection():
+    return sqlite3.connect(DB_PATH)
+
+
 def init_db():
-    connection = sqlite3.connect(DB_PATH)
+    connection = get_connection()
 
     connection.execute("""
         CREATE TABLE IF NOT EXISTS memories (
@@ -16,12 +20,19 @@ def init_db():
         )
     """)
 
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS facts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fact TEXT NOT NULL UNIQUE
+        )
+    """)
+
     connection.commit()
     connection.close()
 
 
 def save_memory(user_message, assistant_response):
-    connection = sqlite3.connect(DB_PATH)
+    connection = get_connection()
 
     connection.execute(
         """
@@ -36,7 +47,7 @@ def save_memory(user_message, assistant_response):
 
 
 def get_recent_memories(limit=10):
-    connection = sqlite3.connect(DB_PATH)
+    connection = get_connection()
 
     cursor = connection.execute(
         """
@@ -54,6 +65,45 @@ def get_recent_memories(limit=10):
     return memories
 
 
+def save_fact(fact):
+    fact = fact.strip()
+
+    if not fact:
+        return
+
+    connection = get_connection()
+
+    connection.execute(
+        """
+        INSERT OR IGNORE INTO facts (fact)
+        VALUES (?)
+        """,
+        (fact,),
+    )
+
+    connection.commit()
+    connection.close()
+
+
+def get_facts(limit=20):
+    connection = get_connection()
+
+    cursor = connection.execute(
+        """
+        SELECT fact
+        FROM facts
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+
+    facts = [row[0] for row in cursor.fetchall()]
+    connection.close()
+
+    return facts
+
+
 if __name__ == "__main__":
     init_db()
-    print(f"Memory database created at: {DB_PATH}")
+    print(f"Memory database initialized at: {DB_PATH}")

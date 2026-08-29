@@ -1,6 +1,12 @@
 import re
 import ollama
-from memory import init_db, save_memory, get_recent_memories
+from memory import (
+    init_db,
+    save_memory,
+    get_recent_memories,
+    save_fact,
+    get_facts,
+)
 from services.tool_dispatcher import run_tool
 from services.intent_router import route_intent
 from services.tool_selector import select_tool
@@ -140,6 +146,114 @@ def detect_file_tool(text: str):
     return None, None
 
 
+def detect_fact(text: str):
+    """
+    Detect simple user-provided facts that are useful
+    for persistent memory.
+
+    Returns:
+        fact string or None
+    """
+
+    text = text.strip()
+
+    patterns = [
+        r"^my name is (.+)$",
+        r"^i am (.+)$",
+        r"^i'm (.+)$",
+        r"^my project is (.+)$",
+        r"^my goal is (.+)$",
+        r"^i want to become (.+)$",
+        r"^i use (.+)$",
+    ]
+
+    for pattern in patterns:
+        match = re.match(pattern, text, re.IGNORECASE)
+
+        if match:
+            value = match.group(1).strip()
+
+            if value:
+                return text
+
+    return None
+
+
+def detect_fact_query(text: str):
+    """
+    Detect simple questions about stored facts.
+
+    Returns:
+        "name", "project", "goal", or None
+    """
+
+    text = text.lower().strip()
+
+    name_queries = [
+        "what is my name",
+        "what's my name",
+        "who am i",
+    ]
+
+    project_queries = [
+        "what is my project",
+        "what's my project",
+        "which project am i working on",
+        "what project am i working on",
+    ]
+
+    goal_queries = [
+        "what is my goal",
+        "what's my goal",
+        "what do i want to become",
+    ]
+
+    if any(query in text for query in name_queries):
+        return "name"
+
+    if any(query in text for query in project_queries):
+        return "project"
+
+    if any(query in text for query in goal_queries):
+        return "goal"
+
+    return None
+
+
+def answer_fact_query(fact_type: str):
+    """
+    Retrieve a matching fact without using Ollama.
+    """
+
+    facts = get_facts(limit=50)
+
+    if fact_type == "name":
+        for fact in facts:
+            if fact.lower().startswith("my name is "):
+                return fact[11:].strip()
+
+        return "I don't have your name stored yet."
+
+    if fact_type == "project":
+        for fact in facts:
+            if fact.lower().startswith("my project is "):
+                return fact[14:].strip()
+
+        return "I don't have your project stored yet."
+
+    if fact_type == "goal":
+        for fact in facts:
+            if fact.lower().startswith("my goal is "):
+                return fact[11:].strip()
+
+            if fact.lower().startswith("i want to become "):
+                return fact[17:].strip()
+
+        return "I don't have your goal stored yet."
+
+    return None
+
+
 def build_context():
     memories = get_recent_memories(limit=10)
 
@@ -158,6 +272,20 @@ def build_context():
                 "role": "assistant",
                 "content": assistant_response,
             }
+        )
+
+    facts = get_facts(limit=20)
+
+    if facts:
+        context.insert(
+            0,
+            {
+                "role": "system",
+                "content": (
+                    "Important facts about the user/project:\n"
+                    + "\n".join(f"- {fact}" for fact in facts)
+                ),
+            },
         )
 
     return context
@@ -279,43 +407,54 @@ def main():
             print("Ultron: Goodbye.")
             break
 
+        detected_fact = detect_fact(user_input)
+
+        if detected_fact:
+            save_fact(detected_fact)
+
         try:
-            system_tool = detect_system_tool(user_input)
-            file_tool, filename = detect_file_tool(user_input)
-            action_tool = detect_action_tool(user_input)
+            fact_query = detect_fact_query(user_input)
 
-            intent = route_intent(system_tool, file_tool, action_tool)
-            selected_tool = select_tool(intent)
-
-            if selected_tool == "system":
-                print("Ultron: Checking system...")
-
-                result = run_tool(system_tool)
-
-                if isinstance(result, dict) and "error" in result:
-                    answer = f"I couldn't check that: {result['error']}"
-                else:
-                    answer = format_system_result(system_tool, result)
-
-            elif selected_tool == "file":
-                print("Ultron: Checking project files...")
-
-                if file_tool == "read_file":
-                    result = run_tool(file_tool, filename)
-                else:
-                    result = run_tool(file_tool)
-
-                answer = format_file_result(file_tool, result)
-
-            elif selected_tool == "action":
-                print("Ultron: Checking...")
-
-                result = run_tool(action_tool)
-                answer = format_action_result(action_tool, result)
+            if fact_query:
+                answer = answer_fact_query(fact_query)
 
             else:
-                print("Ultron: ", end="", flush=True)
-                answer = ask_ultron(user_input)
+                system_tool = detect_system_tool(user_input)
+                file_tool, filename = detect_file_tool(user_input)
+                action_tool = detect_action_tool(user_input)
+
+                intent = route_intent(system_tool, file_tool, action_tool)
+                selected_tool = select_tool(intent)
+
+                if selected_tool == "system":
+                    print("Ultron: Checking system...")
+
+                    result = run_tool(system_tool)
+
+                    if isinstance(result, dict) and "error" in result:
+                        answer = f"I couldn't check that: {result['error']}"
+                    else:
+                        answer = format_system_result(system_tool, result)
+
+                elif selected_tool == "file":
+                    print("Ultron: Checking project files...")
+
+                    if file_tool == "read_file":
+                        result = run_tool(file_tool, filename)
+                    else:
+                        result = run_tool(file_tool)
+
+                    answer = format_file_result(file_tool, result)
+
+                elif selected_tool == "action":
+                    print("Ultron: Checking...")
+
+                    result = run_tool(action_tool)
+                    answer = format_action_result(action_tool, result)
+
+                else:
+                    print("Ultron: ", end="", flush=True)
+                    answer = ask_ultron(user_input)
 
             print(answer)
             print()
