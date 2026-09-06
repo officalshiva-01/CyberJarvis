@@ -127,6 +127,26 @@ def get_recent_memories(limit=10):
     return memories
 
 
+def get_memories_by_type(memory_type, limit=10):
+    connection = get_connection()
+
+    cursor = connection.execute(
+        """
+        SELECT user_message, assistant_response, created_at, memory_type
+        FROM memories
+        WHERE memory_type = ?
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (memory_type, limit),
+    )
+
+    memories = cursor.fetchall()
+    connection.close()
+
+    return memories
+
+
 def save_fact(fact):
     fact = fact.strip()
 

@@ -4,6 +4,7 @@ from memory import (
     init_db,
     save_memory,
     get_recent_memories,
+    get_memories_by_type,
     save_fact,
     get_facts,
 )
@@ -319,7 +320,7 @@ def build_context(current_input: str):
     """
 
     facts = get_facts(limit=20)
-    memories = get_recent_memories(limit=5)
+    memories = get_memories_by_type("conversation", limit=5)
 
     context = []
 
