@@ -17,7 +17,8 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_message TEXT NOT NULL,
             assistant_response TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            memory_type TEXT NOT NULL DEFAULT 'conversation'
         )
     """)
 
@@ -59,11 +60,35 @@ def init_db():
             """
         )
 
+    # Migrate existing databases that do not yet have memory_type.
+    columns = [
+        row[1]
+        for row in connection.execute(
+            "PRAGMA table_info(memories)"
+        )
+    ]
+
+    if "memory_type" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE memories
+            ADD COLUMN memory_type TEXT NOT NULL
+            DEFAULT 'conversation'
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_memories_type
+            ON memories(memory_type)
+            """
+        )
+
     connection.commit()
     connection.close()
 
 
-def save_memory(user_message, assistant_response):
+def save_memory(user_message, assistant_response, memory_type="conversation"):
     connection = get_connection()
 
     connection.execute(
@@ -71,11 +96,12 @@ def save_memory(user_message, assistant_response):
         INSERT INTO memories (
             user_message,
             assistant_response,
-            created_at
+            created_at,
+            memory_type
         )
-        VALUES (?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, CURRENT_TIMESTAMP, ?)
         """,
-        (user_message, assistant_response),
+        (user_message, assistant_response, memory_type),
     )
 
     connection.commit()
@@ -87,7 +113,7 @@ def get_recent_memories(limit=10):
 
     cursor = connection.execute(
         """
-        SELECT user_message, assistant_response, created_at
+        SELECT user_message, assistant_response, created_at, memory_type
         FROM memories
         ORDER BY id DESC
         LIMIT ?

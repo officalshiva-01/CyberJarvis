@@ -338,7 +338,7 @@ def build_context(current_input: str):
 
     relevant_memories = []
 
-    for user_message, assistant_response, created_at in memories:
+    for user_message, assistant_response, created_at, memory_type in memories:
         if is_relevant_memory(user_message, current_input):
             relevant_memories.append(
                 (user_message, assistant_response, created_at)
