@@ -254,13 +254,38 @@ def answer_fact_query(fact_type: str):
     return None
 
 
-def build_context():
+def is_relevant_memory(user_message: str, current_input: str) -> bool:
     """
-    Build a clean, limited context for Ollama.
+    Decide whether a previous user message is relevant
+    to the current request.
+    """
+
+    current_words = set(current_input.lower().split())
+    memory_words = set(user_message.lower().split())
+
+    if not current_words or not memory_words:
+        return False
+
+    # Ignore very common conversational words.
+    stop_words = {
+        "what", "is", "the", "a", "an", "my", "i",
+        "me", "tell", "about", "please", "can", "you",
+        "do", "does", "how", "to", "in", "on", "for"
+    }
+
+    current_words -= stop_words
+    memory_words -= stop_words
+
+    return bool(current_words & memory_words)
+
+
+def build_context(current_input: str):
+    """
+    Build relevant context for Ollama.
 
     Includes:
     - Persistent facts
-    - Last 5 conversation exchanges
+    - Relevant recent conversation
     """
 
     facts = get_facts(limit=20)
@@ -281,7 +306,15 @@ def build_context():
             }
         )
 
-    for user_message, assistant_response in reversed(memories):
+    relevant_memories = []
+
+    for user_message, assistant_response in memories:
+        if is_relevant_memory(user_message, current_input):
+            relevant_memories.append(
+                (user_message, assistant_response)
+            )
+
+    for user_message, assistant_response in reversed(relevant_memories):
         context.append(
             {
                 "role": "user",
@@ -315,7 +348,7 @@ def ask_ultron(user_input: str) -> str:
         }
     ]
 
-    messages.extend(build_context())
+    messages.extend(build_context(user_input))
 
     messages.append(
         {
