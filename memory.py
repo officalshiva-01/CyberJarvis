@@ -16,7 +16,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS memories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_message TEXT NOT NULL,
-            assistant_response TEXT NOT NULL
+            assistant_response TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
@@ -27,6 +28,37 @@ def init_db():
         )
     """)
 
+    # Migrate existing databases that do not yet have created_at.
+    columns = [
+        row[1]
+        for row in connection.execute(
+            "PRAGMA table_info(memories)"
+        )
+    ]
+
+    if "created_at" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE memories
+            ADD COLUMN created_at TEXT
+            """
+        )
+
+        connection.execute(
+            """
+            UPDATE memories
+            SET created_at = CURRENT_TIMESTAMP
+            WHERE created_at IS NULL
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_memories_created_at
+            ON memories(created_at)
+            """
+        )
+
     connection.commit()
     connection.close()
 
@@ -36,8 +68,12 @@ def save_memory(user_message, assistant_response):
 
     connection.execute(
         """
-        INSERT INTO memories (user_message, assistant_response)
-        VALUES (?, ?)
+        INSERT INTO memories (
+            user_message,
+            assistant_response,
+            created_at
+        )
+        VALUES (?, ?, CURRENT_TIMESTAMP)
         """,
         (user_message, assistant_response),
     )
@@ -51,7 +87,7 @@ def get_recent_memories(limit=10):
 
     cursor = connection.execute(
         """
-        SELECT user_message, assistant_response
+        SELECT user_message, assistant_response, created_at
         FROM memories
         ORDER BY id DESC
         LIMIT ?
