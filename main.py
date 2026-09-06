@@ -181,10 +181,10 @@ def detect_fact(text: str):
 
 def detect_fact_query(text: str):
     """
-    Detect simple questions about stored facts.
+    Detect natural-language questions about stored facts.
 
     Returns:
-        "name", "project", "goal", or None
+        "name", "project", "goal", "profile", or None
     """
 
     text = text.lower().strip()
@@ -193,6 +193,8 @@ def detect_fact_query(text: str):
         "what is my name",
         "what's my name",
         "who am i",
+        "tell me my name",
+        "remind me of my name",
     ]
 
     project_queries = [
@@ -200,12 +202,29 @@ def detect_fact_query(text: str):
         "what's my project",
         "which project am i working on",
         "what project am i working on",
+        "which project am i on",
+        "what project am i on",
+        "tell me my project",
+        "remind me what my project is",
+        "remind me about my project",
     ]
 
     goal_queries = [
         "what is my goal",
         "what's my goal",
         "what do i want to become",
+        "what am i trying to become",
+        "tell me my goal",
+        "remind me of my goal",
+    ]
+
+    profile_queries = [
+        "tell me about myself",
+        "what do you know about me",
+        "what do you know about myself",
+        "tell me what you know about me",
+        "what do you remember about me",
+        "what do you remember about myself",
     ]
 
     if any(query in text for query in name_queries):
@@ -216,6 +235,9 @@ def detect_fact_query(text: str):
 
     if any(query in text for query in goal_queries):
         return "goal"
+
+    if any(query in text for query in profile_queries):
+        return "profile"
 
     return None
 
@@ -250,6 +272,14 @@ def answer_fact_query(fact_type: str):
                 return fact[17:].strip()
 
         return "I don't have your goal stored yet."
+
+    if fact_type == "profile":
+        if not facts:
+            return "I don't have any personal facts stored yet."
+
+        return "I remember:\n" + "\n".join(
+            f"- {fact}" for fact in facts
+        )
 
     return None
 
