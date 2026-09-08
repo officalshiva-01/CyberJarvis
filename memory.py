@@ -172,6 +172,39 @@ def get_memories_by_type(memory_type, limit=10):
     return memories
 
 
+def search_memories(query, limit=10):
+    """
+    Search stored memories by text content.
+
+    Searches both user messages and assistant responses.
+    Returns newest matching memories first.
+    """
+    query = query.strip()
+
+    if not query:
+        return []
+
+    connection = get_connection()
+
+    cursor = connection.execute(
+        """
+        SELECT user_message, assistant_response, created_at,
+               memory_type, importance
+        FROM memories
+        WHERE user_message LIKE ?
+           OR assistant_response LIKE ?
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (f"%{query}%", f"%{query}%", limit),
+    )
+
+    memories = cursor.fetchall()
+    connection.close()
+
+    return memories
+
+
 def save_fact(fact):
     fact = fact.strip()
 
