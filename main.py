@@ -146,6 +146,51 @@ def detect_file_tool(text: str):
 
     return None, None
 
+def detect_memory_type(text: str) -> str:
+    """
+    Classify a memory into a simple deterministic type.
+
+    Returns:
+        "goal", "project", "preference", or "conversation"
+    """
+    normalized = text.strip().lower()
+
+    goal_patterns = (
+        "my goal is ",
+        "i want to become ",
+        "i want to learn ",
+        "i want to build ",
+        "i plan to ",
+        "my target is ",
+    )
+
+    project_patterns = (
+        "my project is ",
+        "i am working on ",
+        "i'm working on ",
+        "i am building ",
+        "i'm building ",
+    )
+
+    preference_patterns = (
+        "i prefer ",
+        "i like ",
+        "i don't like ",
+        "i dislike ",
+        "my preference is ",
+    )
+
+    if normalized.startswith(goal_patterns):
+        return "goal"
+
+    if normalized.startswith(project_patterns):
+        return "project"
+
+    if normalized.startswith(preference_patterns):
+        return "preference"
+
+    return "conversation"
+
 
 def detect_fact(text: str):
     """
@@ -535,7 +580,8 @@ def main():
             print()
 
             # Save conversation to persistent memory
-            save_memory(user_input, answer)
+            memory_type = detect_memory_type(user_input)
+            save_memory(user_input, answer, memory_type)
 
         except Exception as error:
             print(f"\n❌ Error: {error}\n")
