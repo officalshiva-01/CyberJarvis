@@ -18,7 +18,8 @@ def init_db():
             user_message TEXT NOT NULL,
             assistant_response TEXT NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            memory_type TEXT NOT NULL DEFAULT 'conversation'
+            memory_type TEXT NOT NULL DEFAULT 'conversation',
+            importance INTEGER NOT NULL DEFAULT 3
         )
     """)
 
@@ -81,6 +82,30 @@ def init_db():
             """
             CREATE INDEX IF NOT EXISTS idx_memories_type
             ON memories(memory_type)
+            """
+        )
+
+    # Migrate existing databases that do not yet have importance.
+    columns = [
+        row[1]
+        for row in connection.execute(
+            "PRAGMA table_info(memories)"
+        )
+    ]
+
+    if "importance" not in columns:
+        connection.execute(
+            """
+            ALTER TABLE memories
+            ADD COLUMN importance INTEGER NOT NULL
+            DEFAULT 3
+            """
+        )
+
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_memories_importance
+            ON memories(importance)
             """
         )
 
