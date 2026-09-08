@@ -172,11 +172,12 @@ def get_memories_by_type(memory_type, limit=10):
     return memories
 
 
-def search_memories(query, limit=10):
+def search_memories(query, limit=10, memory_type=None):
     """
     Search stored memories by text content.
 
     Searches both user messages and assistant responses.
+    Optionally filters results by memory type.
     Returns newest matching memories first.
     """
     query = query.strip()
@@ -186,18 +187,33 @@ def search_memories(query, limit=10):
 
     connection = get_connection()
 
-    cursor = connection.execute(
-        """
-        SELECT user_message, assistant_response, created_at,
-               memory_type, importance
-        FROM memories
-        WHERE user_message LIKE ?
-           OR assistant_response LIKE ?
-        ORDER BY id DESC
-        LIMIT ?
-        """,
-        (f"%{query}%", f"%{query}%", limit),
-    )
+    if memory_type:
+        cursor = connection.execute(
+            """
+            SELECT user_message, assistant_response, created_at,
+                   memory_type, importance
+            FROM memories
+            WHERE (user_message LIKE ?
+               OR assistant_response LIKE ?)
+              AND memory_type = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (f"%{query}%", f"%{query}%", memory_type, limit),
+        )
+    else:
+        cursor = connection.execute(
+            """
+            SELECT user_message, assistant_response, created_at,
+                   memory_type, importance
+            FROM memories
+            WHERE user_message LIKE ?
+               OR assistant_response LIKE ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (f"%{query}%", f"%{query}%", limit),
+        )
 
     memories = cursor.fetchall()
     connection.close()
