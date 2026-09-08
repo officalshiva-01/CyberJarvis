@@ -238,6 +238,22 @@ def rank_memories(memories):
     )
 
 
+def search_and_rank_memories(query, limit=10, memory_type=None):
+    """
+    Search memories and return the most relevant matches first.
+
+    Relevance is determined by memory importance and recency.
+    An optional memory type can restrict the search.
+    """
+    memories = search_memories(
+        query,
+        limit=limit,
+        memory_type=memory_type,
+    )
+
+    return rank_memories(memories)
+
+
 def save_fact(fact):
     fact = fact.strip()
 
