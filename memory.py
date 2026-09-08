@@ -221,6 +221,23 @@ def search_memories(query, limit=10, memory_type=None):
     return memories
 
 
+def rank_memories(memories):
+    """
+    Rank memories using importance and recency.
+
+    Higher importance is preferred.
+    Newer memories are preferred when importance is equal.
+    """
+    return sorted(
+        memories,
+        key=lambda memory: (
+            memory[4],
+            memory[2],
+        ),
+        reverse=True,
+    )
+
+
 def save_fact(fact):
     fact = fact.strip()
 
