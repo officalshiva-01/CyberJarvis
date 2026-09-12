@@ -12,3 +12,5 @@ cyberjarvis.db
 *.step*-backup
 *.swp
 .*.swp
+logs/
+*.log
