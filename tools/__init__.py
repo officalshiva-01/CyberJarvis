@@ -5,5 +5,7 @@ import tools.file_tools
 import tools.network_tools
 import tools.git_tools
 import tools.action_tools
+import integrations.github_api
+import integrations.weather_api
 
 __all__ = ["registry", "ToolRegistry"]

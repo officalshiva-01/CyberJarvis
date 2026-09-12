@@ -2,7 +2,7 @@ import time
 import inspect
 from typing import Callable, Dict, Any, Optional, List
 
-from agent.schemas import ToolDefinition, ToolResult
+from tools.schemas import ToolDefinition, ToolResult
 from security.policy import RiskLevel, PermissionLevel, SecurityPolicy
 from security.confirmation import ConfirmationHandler
 from observability.logging import get_logger
@@ -16,7 +16,6 @@ class RegisteredTool:
         self.func = func
 
     def __call__(self, **kwargs):
-        # Filter kwargs to only those accepted by the function
         sig = inspect.signature(self.func)
         filtered_kwargs = {}
         for param_name, param in sig.parameters.items():
