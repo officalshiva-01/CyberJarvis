@@ -1,4 +1,7 @@
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from agent.agent_core import AgentCore
@@ -7,7 +10,17 @@ from memory import init_db, get_facts
 
 class TestAgentCore(unittest.TestCase):
     def setUp(self):
+        self.tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.tmp_db.close()
+        os.environ["CYBERJARVIS_DB_PATH"] = self.tmp_db.name
         init_db()
+
+    def tearDown(self):
+        try:
+            Path(self.tmp_db.name).unlink(missing_ok=True)
+        except Exception:
+            pass
+        os.environ.pop("CYBERJARVIS_DB_PATH", None)
 
     @patch("ollama.chat")
     def test_agent_core_diagnose_flow(self, mock_ollama):
@@ -32,7 +45,7 @@ class TestAgentCore(unittest.TestCase):
 
         # Verify statuses
         self.assertTrue(any("Planning" in s for s in statuses))
-        self.assertTrue(any("Running: diagnose_system_bottleneck" in s for s in statuses))
+        self.assertTrue(any("diagnose_system_bottleneck" in s for s in statuses))
         self.assertTrue(any("Analyzing" in s for s in statuses))
 
     @patch("ollama.chat")

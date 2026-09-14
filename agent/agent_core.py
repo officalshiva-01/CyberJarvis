@@ -1,3 +1,4 @@
+import time
 from typing import Optional, Callable
 from agent.schemas import AgentResponse
 from agent.state import ConversationState, Turn
@@ -50,8 +51,10 @@ class AgentCore:
 
         # 2. Planning phase
         self.on_status("🧠 Planning...")
+        plan_start = time.perf_counter()
         plan = self.planner.plan(user_input_clean, state=self.state)
-        logger.info(f"Generated plan: intent='{plan.intent}', goal='{plan.goal}', steps={len(plan.steps)}")
+        planning_ms = (time.perf_counter() - plan_start) * 1000
+        logger.info(f"Generated plan in {planning_ms:.1f}ms: intent='{plan.intent}', goal='{plan.goal}', steps={len(plan.steps)}")
 
         # 3. Execution phase
         tool_results = []
@@ -60,6 +63,7 @@ class AgentCore:
 
         # 4. Evaluation / Synthesis phase
         self.on_status("📊 Analyzing...")
+        eval_start = time.perf_counter()
         facts = get_facts(limit=10)
         response = self.evaluator.evaluate(
             user_input=user_input_clean,
@@ -67,6 +71,9 @@ class AgentCore:
             results=tool_results,
             context_facts=facts,
         )
+        evaluator_ms = (time.perf_counter() - eval_start) * 1000
+        response.planning_ms = round(planning_ms, 2)
+        response.evaluator_ms = round(evaluator_ms, 2)
         self.on_status("✅ Diagnosis ready" if "diagnose" in plan.intent else "✅ Complete")
 
         # 5. Persist to conversational state & long-term memory

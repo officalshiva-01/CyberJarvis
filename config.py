@@ -3,7 +3,7 @@ from pathlib import Path
 
 # Paths
 PROJECT_ROOT = Path(__file__).parent.resolve()
-DB_PATH = PROJECT_ROOT / "cyberjarvis.db"
+DB_PATH = Path(os.getenv("CYBERJARVIS_DB_PATH", str(PROJECT_ROOT / "cyberjarvis.db"))).resolve()
 LOG_DIR = PROJECT_ROOT / "logs"
 
 # Ollama Model Configuration

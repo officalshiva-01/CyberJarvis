@@ -6,8 +6,11 @@ from observability.logging import get_logger
 logger = get_logger("CyberJarvis.Memory")
 
 
+import os
+
 def get_connection() -> sqlite3.Connection:
-    return sqlite3.connect(DB_PATH)
+    db_path = os.getenv("CYBERJARVIS_DB_PATH", str(DB_PATH))
+    return sqlite3.connect(db_path)
 
 
 def init_db():

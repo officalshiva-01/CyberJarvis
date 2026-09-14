@@ -23,3 +23,6 @@ class AgentResponse(BaseModel):
     plan: Optional[AgentPlan] = None
     tool_results: List[ToolResult] = Field(default_factory=list)
     completed: bool = True
+    planning_ms: float = 0.0
+    evaluator_ms: float = 0.0
+

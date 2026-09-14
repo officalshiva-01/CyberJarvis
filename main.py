@@ -1,48 +1,44 @@
 """
-CyberJarvis: Production-Oriented Voice-Controlled Local AI Agent.
+CyberJarvis: Production Voice-Controlled Local AI Diagnostic Agent.
 
 Combines:
+- Physical Microphone Audio Capture (PipeWire / ALSA)
+- Speech-to-Text & Text-to-Speech (spd-say)
+- Unified Agent Gateway (Fast Path & Agent Path)
 - Local LLM Planning (Ollama / phi3:mini)
-- Local System Diagnostics (CPU, RAM, Swap, Disk, Top Processes, Network, Git)
-- Unified Tool Registry & Execution Engine
-- Security Policy & Confirmation Guardrails
+- Parallel Diagnostic Execution (psutil / network / git)
+- Evidence-Grounded Evaluator (Strict anti-hallucination guardrails)
 - Persistent SQLite Memory (Facts, Typed Memories, Relevance Ranking)
-- Speech-to-Text (STT) and Text-to-Speech (TTS) Voice Pipeline
-- Structured Observability & Tracing
+- Professional Terminal Dashboard UI
 """
 import sys
+import time
 import argparse
 from pathlib import Path
 
 from config import DEFAULT_MODEL, DB_PATH
 from memory import init_db
-from agent.agent_core import AgentCore
+from agent.gateway import AgentGateway
 from voice.text_to_speech import TextToSpeech
 from voice.voice_loop import VoiceAssistantLoop
+from ui.dashboard import TerminalDashboard
 from observability.logging import get_logger
 
 logger = get_logger("CyberJarvis.Main")
 
-EXIT_COMMANDS = {"exit", "quit", "bye", "/bye"}
+EXIT_COMMANDS = {"exit", "quit", "bye", "goodbye", "/bye", "band karo"}
 
 
 def run_terminal_mode(model: str = DEFAULT_MODEL, enable_voice_output: bool = True):
-    """Interactive terminal agent mode with real-time status and optional TTS."""
+    """Interactive terminal agent mode with real-time dashboard and optional TTS."""
     init_db()
     tts = TextToSpeech() if enable_voice_output else None
 
     def on_status_change(status_text: str):
-        print(status_text)
+        print(f"  ⏳ {status_text}")
 
-    agent = AgentCore(on_status_change=on_status_change)
-
-    print("\n" + "=" * 55)
-    print("🤖 CyberJarvis AI Agent")
-    print("Persistent memory: ON (SQLite)")
-    print(f"LLM Engine: Ollama ({model})")
-    print("Tools: Hardware Diagnostics, Network, Git, Files, Actions")
-    print("Type 'exit', 'quit', or 'bye' to quit.")
-    print("=" * 55 + "\n")
+    gateway = AgentGateway(on_status_change=on_status_change)
+    TerminalDashboard.print_banner(mode="TERMINAL INTERACTIVE", model=model)
 
     while True:
         try:
@@ -55,17 +51,23 @@ def run_terminal_mode(model: str = DEFAULT_MODEL, enable_voice_output: bool = Tr
             continue
 
         if user_input.lower() in EXIT_COMMANDS:
-            print("CyberJarvis: Goodbye.")
+            farewell = "Goodbye! Shutting down CyberJarvis."
+            print(f"\nCyberJarvis: {farewell}\n")
             if tts:
-                tts.speak("Goodbye.", blocking=False)
+                tts.speak(farewell, blocking=False)
             break
 
         try:
-            response = agent.process(user_input)
-            print(f"\nCyberJarvis:\n{response.answer}\n")
+            result = gateway.process_command(user_input, source="terminal")
 
-            if tts and response.spoken_summary:
-                tts.speak(response.spoken_summary, blocking=False)
+            if tts and result.response.spoken_summary:
+                tts_start = time.perf_counter()
+                tts.speak(result.response.spoken_summary, blocking=False)
+                tts_duration_ms = (time.perf_counter() - tts_start) * 1000
+                result.latency.tts_ms = round(tts_duration_ms, 2)
+                result.latency.total_ms = round(result.latency.total_ms + tts_duration_ms, 2)
+
+            TerminalDashboard.render_agent_turn(user_input, result)
 
         except Exception as error:
             logger.error(f"Error processing command: {error}", exc_info=True)
@@ -78,7 +80,8 @@ def run_one_shot_diagnosis():
     print("\n🔍 Running Comprehensive System Diagnosis...\n")
     diag = diagnose_system_bottleneck()
 
-    print(f"Diagnosis Verdict: {diag['verdict']}")
+    verdict_emoji = "🟢" if diag["verdict"] == "HEALTHY" else "🔴"
+    print(f"Diagnosis Verdict: {verdict_emoji} {diag['verdict']}")
     print(f"Summary: {diag['summary']}\n")
     print("Metrics:")
     for k, v in diag["metrics"].items():
@@ -97,7 +100,7 @@ def run_one_shot_diagnosis():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="CyberJarvis Local AI Agent")
+    parser = argparse.ArgumentParser(description="CyberJarvis Local AI Diagnostic Agent")
     parser.add_argument("--voice", "-v", action="store_true", help="Start in voice-controlled interactive mode")
     parser.add_argument("--no-tts", action="store_true", help="Disable voice output in terminal mode")
     parser.add_argument("--diagnose", "-d", action="store_true", help="Run immediate hardware & process diagnosis")
@@ -108,7 +111,7 @@ def main():
     if args.diagnose:
         run_one_shot_diagnosis()
     elif args.voice:
-        loop = VoiceAssistantLoop()
+        loop = VoiceAssistantLoop(model=args.model)
         loop.run()
     else:
         run_terminal_mode(model=args.model, enable_voice_output=not args.no_tts)
