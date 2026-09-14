@@ -25,4 +25,5 @@ class AgentResponse(BaseModel):
     completed: bool = True
     planning_ms: float = 0.0
     evaluator_ms: float = 0.0
+    diagnostic_report: Optional[Any] = None
 

@@ -33,8 +33,18 @@ class TerminalDashboard:
         print(f"👤 USER:  {user_input}")
         print("─" * 62)
 
-        # Agent Path / Route indication
-        route_label = "⚡ FAST PATH (Deterministic)" if result.route == "fast_path" else "🧠 AGENT PATH (LLM Reasoning)"
+        # Execution Path & Route indication
+        exec_path = getattr(result, "execution_path", None)
+        if not exec_path:
+            exec_path = "FAST" if result.route == "fast_path" else ("DIAGNOSTIC" if result.route == "diagnostic_path" else "AGENT")
+        print(f"Execution Path:\n{exec_path}\n")
+
+        if exec_path == "FAST":
+            route_label = "⚡ FAST PATH (Deterministic)"
+        elif exec_path == "DIAGNOSTIC":
+            route_label = "🔍 DIAGNOSTIC PATH (Deterministic Parallel)"
+        else:
+            route_label = "🧠 AGENT PATH (LLM Reasoning)"
         print(f"⚙️ ROUTE: {route_label}")
 
         # Tools summary if tools were executed
@@ -58,7 +68,7 @@ class TerminalDashboard:
             print(f'  "{resp.spoken_summary}"')
 
         # Compact timing report and single largest source of latency
-        print("\n⏱️ TIMING REPORT:")
+        print("\n⏱️ TIMING")
         for line in lat.format_timing_report().splitlines():
             print(f"  {line}")
         print("─" * 62 + "\n")

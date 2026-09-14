@@ -20,13 +20,27 @@ GREETING_WORDS = {"hello", "hi", "hey", "namaste", "greetings", "yo"}
 
 class FastPathHandler:
     """Executes deterministic queries directly without invoking the LLM."""
-
     def try_handle(self, user_input: str) -> Optional[AgentResponse]:
-        text = user_input.strip().lower()
+        raw = user_input.strip()
+        wake_patterns = [
+            r"^cyberjarvis[\s,:\-]*",
+            r"^hey jarvis[\s,:\-]*",
+            r"^hello jarvis[\s,:\-]*",
+            r"^jarvis[\s,:\-]*",
+            r"^ok jarvis[\s,:\-]*",
+        ]
+        stripped = raw
+        for wp in wake_patterns:
+            stripped = re.sub(wp, "", stripped, flags=re.IGNORECASE).strip()
+
+        text = stripped.lower()
         clean_tokens = set(re.sub(r"[^\w\s]", "", text).split())
 
         # Never intercept complex diagnostic or troubleshooting queries
-        if any(w in text for w in ["diagnose", "slow", "sluggish", "bottleneck", "why", "troubleshoot", "investigate"]):
+        if any(w in text for w in [
+            "diagnose", "slow", "sluggish", "bottleneck", "why", "troubleshoot",
+            "investigate", "system health", "system status", "consuming"
+        ]):
             return None
 
         # 0a. Voice Exit commands (Rule 10)
@@ -118,16 +132,16 @@ class FastPathHandler:
             return self._handle_connectivity_query()
 
         # 10. Direct Hardware & System metrics (Deterministic fast path - Rule 2)
-        if text in ["check cpu", "cpu usage", "what is cpu usage", "what is my cpu usage", "current cpu usage", "check cpu usage"]:
+        if text in ["check cpu", "check my cpu", "cpu usage", "what is cpu usage", "what is my cpu usage", "current cpu usage", "check cpu usage"]:
             return self._handle_cpu_query()
 
-        if text in ["check ram", "ram usage", "memory usage", "check memory usage", "what is memory usage", "what is my memory usage", "current ram usage", "check memory"]:
+        if text in ["check ram", "check my ram", "ram usage", "memory usage", "check memory usage", "what is memory usage", "what is my memory usage", "current ram usage", "check memory", "check my memory"]:
             return self._handle_memory_query()
 
-        if text in ["check disk", "disk usage", "what is disk usage", "check disk space", "disk space", "storage space"]:
+        if text in ["check disk", "check my disk", "disk usage", "what is disk usage", "check disk space", "disk space", "storage space", "check my disk space"]:
             return self._handle_disk_query()
 
-        if text in ["uptime", "system uptime", "check uptime"]:
+        if text in ["uptime", "system uptime", "check uptime", "check system uptime"]:
             return self._handle_uptime_query()
 
         return None
