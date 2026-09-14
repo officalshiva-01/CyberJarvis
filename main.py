@@ -58,7 +58,7 @@ def run_terminal_mode(model: str = DEFAULT_MODEL, enable_voice_output: bool = Tr
             break
 
         try:
-            result = gateway.process_command(user_input, source="terminal")
+            result = gateway.process_user_request(user_input, source="terminal")
 
             if tts and result.response.spoken_summary:
                 tts_start = time.perf_counter()

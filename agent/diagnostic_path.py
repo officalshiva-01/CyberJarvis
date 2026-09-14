@@ -93,8 +93,20 @@ class DiagnosticPathHandler:
 
     def _select_diagnostic_tools(self, user_lower: str) -> List[Tuple[str, Dict[str, Any]]]:
         """Select predefined diagnostic plan based on query specificity."""
+        # Network specific query
+        if any(w in user_lower for w in ["check my network", "check network", "mera internet check karo", "network check"]):
+            return [
+                ("check_network_connectivity", {}),
+                ("check_dns_resolution", {"domain": "github.com"}),
+            ]
+
         # Top memory query
-        if any(w in user_lower for w in ["consuming the most memory", "most memory", "consuming memory", "using memory", "which process is consuming"]):
+        if any(w in user_lower for w in [
+            "consuming the most memory", "most memory", "consuming memory", "using memory",
+            "which process is consuming", "what is using the most memory", "what is taking memory",
+            "taking memory", "ram kaun use kar raha hai", "kaun memory use kar raha hai",
+            "kaun ram use kar raha hai"
+        ]):
             if "cpu" not in user_lower:
                 return [
                     ("get_top_processes", {"limit": 5, "sort_by": "memory"}),
@@ -102,7 +114,7 @@ class DiagnosticPathHandler:
                 ]
 
         # Top CPU query
-        if any(w in user_lower for w in ["consuming the most cpu", "most cpu", "consuming cpu", "using cpu"]):
+        if any(w in user_lower for w in ["consuming the most cpu", "most cpu", "consuming cpu", "using cpu", "top cpu"]):
             if "memory" not in user_lower and "ram" not in user_lower:
                 return [
                     ("get_top_processes", {"limit": 5, "sort_by": "cpu"}),

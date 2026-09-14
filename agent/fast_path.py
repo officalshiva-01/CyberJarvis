@@ -7,6 +7,7 @@ import re
 import time
 from typing import Optional, List
 from agent.schemas import AgentResponse, AgentPlan, PlanStep
+from agent.router import normalize_transcript
 from tools.schemas import ToolResult
 from memory import get_facts, search_memories
 from tools.registry import registry
@@ -14,32 +15,29 @@ from observability.logging import get_logger
 
 logger = get_logger("CyberJarvis.FastPath")
 
-EXIT_PHRASES = {"exit", "quit", "bye", "goodbye"}
+EXIT_PHRASES = {"exit", "quit", "bye", "goodbye", "stop", "terminate", "band karo"}
 GREETING_WORDS = {"hello", "hi", "hey", "namaste", "greetings", "yo"}
 
 
 class FastPathHandler:
     """Executes deterministic queries directly without invoking the LLM."""
-    def try_handle(self, user_input: str) -> Optional[AgentResponse]:
-        raw = user_input.strip()
-        wake_patterns = [
-            r"^cyberjarvis[\s,:\-]*",
-            r"^hey jarvis[\s,:\-]*",
-            r"^hello jarvis[\s,:\-]*",
-            r"^jarvis[\s,:\-]*",
-            r"^ok jarvis[\s,:\-]*",
-        ]
-        stripped = raw
-        for wp in wake_patterns:
-            stripped = re.sub(wp, "", stripped, flags=re.IGNORECASE).strip()
 
-        text = stripped.lower()
+    def try_handle(self, user_input: str) -> Optional[AgentResponse]:
+        text = normalize_transcript(user_input)
+        if not text:
+            text = user_input.lower().strip()
+            if not text:
+                return None
+
         clean_tokens = set(re.sub(r"[^\w\s]", "", text).split())
 
         # Never intercept complex diagnostic or troubleshooting queries
         if any(w in text for w in [
             "diagnose", "slow", "sluggish", "bottleneck", "why", "troubleshoot",
-            "investigate", "system health", "system status", "consuming"
+            "investigate", "system health", "system status", "consuming",
+            "analyze my computer", "analyse my computer", "check my computer", "check my system",
+            "check my network", "taking memory", "using memory", "mera computer", "mera system",
+            "mere system", "ram kaun"
         ]):
             return None
 
@@ -84,10 +82,18 @@ class FastPathHandler:
             return self._handle_project_query()
 
         # 4. Clock / Time questions
-        time_match = any(p in text for p in [
-            "what time is it", "what's the time", "current time",
-            "kya time hua hai", "time batao", "samay kya hai"
-        ]) or text == "time"
+        time_matches = [
+            "what time is it", "what's the time", "current time", "tell me the time",
+            "time which is my computer", "what is my computer time", "computer ka time kya hai",
+            "computer time", "system time", "kya time hua hai", "time batao", "samay kya hai",
+            "kya samay hai", "samay batao", "tell me time", "what is time"
+        ]
+        time_match = (
+            text in time_matches
+            or any(p in text for p in time_matches)
+            or text == "time"
+            or ("time" in text and any(w in text for w in ["computer", "system", "tell", "current", "what", "kya", "which"]))
+        )
         if time_match:
             return self._handle_time_query()
 
@@ -101,7 +107,7 @@ class FastPathHandler:
 
         # 6. Current working directory
         pwd_match = any(p in text for p in [
-            "current directory", "working directory", "where am i",
+            "what is my current directory", "current directory", "working directory", "where am i",
             "current folder", "pwd"
         ])
         if pwd_match:

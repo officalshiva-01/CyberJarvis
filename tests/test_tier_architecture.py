@@ -335,10 +335,10 @@ class TestThreeTierArchitecture(unittest.TestCase):
         report = lat.format_timing_report()
         self.assertIn("STT: 0.1s", report)
         self.assertIn("Router:", report)
-        self.assertIn("Planner: skipped", report)
+        self.assertIn("Planner: SKIPPED", report)
         self.assertIn("Tools: 0.5s", report)
         self.assertIn("Analysis:", report)
-        self.assertIn("Evaluator: skipped", report)
+        self.assertIn("Evaluator: SKIPPED", report)
         self.assertIn("TTS: 0.1s", report)
         self.assertIn("Total: 0.7s", report)
 

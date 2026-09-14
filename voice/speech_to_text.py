@@ -35,27 +35,26 @@ class SpeechToText:
 
     def listen_and_transcribe(
         self,
-        timeout: float = 7.0,
-        phrase_time_limit: float = 10.0,
+        timeout: float = 3.5,
+        phrase_time_limit: float = 6.0,
         max_retries: int = 2,
     ) -> Optional[str]:
         """
         Listen from physical microphone and transcribe speech to text.
-        Retries at most twice upon failure (Rules 8 & 9), then provides clean keyboard fallback.
+        Retries at most twice upon failure (Rules 8 & 9, Section 6), then provides keyboard fallback.
         """
         if not self.is_voice_input_available():
             try:
-                print(f"\n🎤 ({self.get_microphone_info()}) Enter command: ", end="")
-                text = input().strip()
-                return text if text else None
+                print(f"🎤 ({self.get_microphone_info()})")
+                fallback_text = input("⌨️ Voice unavailable. Enter command: ").strip()
+                return fallback_text if fallback_text else None
             except (KeyboardInterrupt, EOFError):
                 return None
 
         # Retry loop: attempt 0 is initial try, followed by at most max_retries retries
         for attempt in range(max_retries + 1):
             try:
-                attempt_label = f" (Retry {attempt}/{max_retries})" if attempt > 0 else ""
-                print(f"\n🎤 Listening...{attempt_label} (Speak your command)")
+                print("\n🎤 Listening...")
                 pcm_data, status = self.capture.record_phrase(
                     timeout=timeout,
                     phrase_time_limit=phrase_time_limit,
@@ -66,8 +65,9 @@ class SpeechToText:
 
                 if not pcm_data:
                     logger.debug(f"Audio capture ended: {status}")
+                    print("❌ Speech not recognized")
                     if attempt < max_retries:
-                        print(f"❓ No clear speech detected. Retrying ({attempt + 1}/{max_retries})...")
+                        print(f"🔁 Retry {attempt + 1}/{max_retries}")
                         continue
                     else:
                         break
@@ -83,22 +83,23 @@ class SpeechToText:
                     logger.info(f"Transcribed audio: '{transcript}'")
                     return transcript
                 else:
+                    print("❌ Speech not recognized")
                     if attempt < max_retries:
-                        print(f"❓ Could not transcribe speech. Retrying ({attempt + 1}/{max_retries})...")
+                        print(f"🔁 Retry {attempt + 1}/{max_retries}")
                     else:
-                        print(f"❓ Could not transcribe speech after {max_retries} retries.")
+                        break
 
             except Exception as ex:
                 logger.warning(f"Voice capture exception: {ex}")
+                print("❌ Speech not recognized")
                 if attempt < max_retries:
-                    print(f"⚠️ Voice error: {ex}. Retrying ({attempt + 1}/{max_retries})...")
+                    print(f"🔁 Retry {attempt + 1}/{max_retries}")
                 else:
                     break
 
-        # Clean fallback after at most 2 retries (Rule 8 & 9)
-        print("\n⚠️ Voice recognition unavailable after retries. Switching to clean text fallback.")
+        # Keyboard fallback after failed retries (Section 6)
         try:
-            fallback_text = input("⌨️ Enter command (or 'exit' to quit): ").strip()
+            fallback_text = input("\n⌨️ Voice unavailable. Enter command: ").strip()
             return fallback_text if fallback_text else None
         except (KeyboardInterrupt, EOFError):
             return None

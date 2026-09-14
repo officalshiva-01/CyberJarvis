@@ -61,7 +61,7 @@ class VoiceAssistantLoop:
                     break
 
                 # Process command through Agent Gateway with latency measurement
-                gateway_result = self.gateway.process_command(
+                gateway_result = self.gateway.process_user_request(
                     user_input=user_command,
                     source="voice",
                     stt_latency_ms=stt_duration_ms,

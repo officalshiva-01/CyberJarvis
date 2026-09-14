@@ -2,7 +2,8 @@
 Agent Gateway for CyberJarvis.
 Unified entry point for Terminal UI, Voice UI, and future Web UI.
 Coordinates:
-- Input adaptation and wake word handling
+- Transcript normalization (wake word removal, whitespace, lowercase)
+- Single authoritative entry point: process_user_request()
 - Three-tier execution architecture:
     * Tier 1: Fast Path (Deterministic facts, time, date, single metrics)
     * Tier 2: Diagnostic Path (Predefined parallel plan + deterministic analyzer, zero LLM)
@@ -14,7 +15,7 @@ from typing import Optional, Callable, Dict, Any
 from pydantic import BaseModel, Field
 
 from agent.schemas import AgentResponse, AgentPlan
-from agent.router import ExecutionRouter, RouteType
+from agent.router import ExecutionRouter, RouteType, normalize_transcript
 from agent.fast_path import FastPathHandler
 from agent.diagnostic_path import DiagnosticPathHandler
 from agent.agent_core import AgentCore
@@ -59,10 +60,10 @@ class LatencyBreakdown(BaseModel):
     def format_timing_report(self) -> str:
         stt_s = f"{self.stt_ms / 1000.0:.1f}s"
         router_s = f"{self.router_ms / 1000.0:.1f}s" if self.router_ms >= 100 else (f"{self.router_ms:.1f}ms" if self.router_ms > 0 else "0.0s")
-        planner_s = f"{self.planning_ms / 1000.0:.1f}s" if self.planning_ms > 0 else "skipped"
+        planner_s = f"{self.planning_ms / 1000.0:.1f}s" if self.planning_ms > 0 else "SKIPPED"
         tools_s = f"{self.tools_ms / 1000.0:.1f}s"
-        analysis_s = f"{self.analysis_ms / 1000.0:.1f}s" if self.analysis_ms >= 100 else (f"{self.analysis_ms:.1f}ms" if self.analysis_ms > 0 else ("0.0s" if self.planning_ms == 0 else "skipped"))
-        evaluator_s = f"{self.evaluator_ms / 1000.0:.1f}s" if self.evaluator_ms > 0 else "skipped"
+        analysis_s = f"{self.analysis_ms / 1000.0:.1f}s" if self.analysis_ms >= 100 else (f"{self.analysis_ms:.1f}ms" if self.analysis_ms > 0 else ("0.0s" if self.planning_ms == 0 else "SKIPPED"))
+        evaluator_s = f"{self.evaluator_ms / 1000.0:.1f}s" if self.evaluator_ms > 0 else "SKIPPED"
         tts_s = f"{self.tts_ms / 1000.0:.1f}s"
         total_s = f"{self.total_ms / 1000.0:.1f}s"
 
@@ -106,7 +107,7 @@ class AgentGateway:
         self.diagnostic_path = diagnostic_path or DiagnosticPathHandler(on_status_change=self.on_status)
         self.agent_core = agent_core or AgentCore(on_status_change=self.on_status)
 
-    def process_command(
+    def process_user_request(
         self,
         user_input: str,
         source: str = "terminal",
@@ -115,20 +116,24 @@ class AgentGateway:
         vad_ms: float = 0.0,
     ) -> GatewayResult:
         """
-        Process a user instruction from any interface with three-tier routing
-        and end-to-end timing.
+        Authoritative execution entry point for all interfaces (Terminal, Voice, API).
+        Coordinates transcript normalization, three-tier routing, and granular latency measurement.
         """
         start_time = time.perf_counter()
-        clean_input = user_input.strip()
 
-        logger.info(f"Gateway received command from [{source}]: '{clean_input}'")
+        # 0a. Normalize input (lowercase, trim, collapse whitespace, strip harmless wake words)
+        clean_input = normalize_transcript(user_input)
+        if not clean_input:
+            clean_input = user_input.strip()
+
+        logger.info(f"Gateway process_user_request [{source}]: raw='{user_input}' -> normalized='{clean_input}'")
         breakdown = LatencyBreakdown(
             stt_ms=round(stt_latency_ms, 2),
             mic_capture_ms=round(mic_capture_ms, 2),
             vad_ms=round(vad_ms, 2),
         )
 
-        # 0. Route Classification (Deterministic & executed BEFORE any LLM call)
+        # 0b. Route Classification (Deterministic & executed BEFORE any LLM call)
         router_start = time.perf_counter()
         route_decision = self.router.classify(clean_input)
         router_ms = (time.perf_counter() - router_start) * 1000
@@ -173,7 +178,7 @@ class AgentGateway:
             breakdown.tool_breakdown = {r.tool_name: r.duration_ms for r in diag_response.tool_results}
             breakdown.execution_path = "DIAGNOSTIC"
 
-            logger.info(f"Command handled via Diagnostic Path in {breakdown.total_ms}ms")
+            logger.info(f"Command handled via Diagnostic Path in {breakdown.total_ms}ms (parallel_tools={parallel_ms}ms)")
             return GatewayResult(
                 response=diag_response,
                 route="diagnostic_path",
@@ -205,3 +210,41 @@ class AgentGateway:
             source=source,
             execution_path="AGENT",
         )
+
+    def process_command(
+        self,
+        user_input: str,
+        source: str = "terminal",
+        stt_latency_ms: float = 0.0,
+        mic_capture_ms: float = 0.0,
+        vad_ms: float = 0.0,
+    ) -> GatewayResult:
+        """Backward-compatible alias for process_user_request."""
+        return self.process_user_request(
+            user_input=user_input,
+            source=source,
+            stt_latency_ms=stt_latency_ms,
+            mic_capture_ms=mic_capture_ms,
+            vad_ms=vad_ms,
+        )
+
+
+_default_gateway: Optional[AgentGateway] = None
+
+
+def get_default_gateway() -> AgentGateway:
+    global _default_gateway
+    if _default_gateway is None:
+        _default_gateway = AgentGateway()
+    return _default_gateway
+
+
+def process_user_request(
+    text: str,
+    source: str = "terminal",
+    gateway: Optional[AgentGateway] = None,
+    **kwargs,
+) -> GatewayResult:
+    """Module-level authoritative execution entry point."""
+    gw = gateway or get_default_gateway()
+    return gw.process_user_request(user_input=text, source=source, **kwargs)

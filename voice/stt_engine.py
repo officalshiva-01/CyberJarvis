@@ -34,11 +34,17 @@ class GoogleSTTEngine(BaseSTTEngine):
     Supports Hindi, English, and Hinglish accents.
     """
 
-    def __init__(self, languages: Optional[List[str]] = None, timeout: float = 6.0):
-        # Default languages to try in priority order: Indian English, US English, Hindi
+    def __init__(self, languages: Optional[List[str]] = None, timeout: float = 3.5):
+        # Default languages in priority order: Indian English (matches English + Hinglish), US English, Hindi
         self.languages = languages or ["en-IN", "en-US", "hi-IN"]
         self.timeout = timeout
         self.flac_bin = shutil.which("flac")
+        self._client: Optional[httpx.Client] = None
+
+    def _get_client(self) -> httpx.Client:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.Client(timeout=self.timeout)
+        return self._client
 
     def _pcm_to_wav(self, pcm_data: bytes, sample_rate: int) -> bytes:
         buf = io.BytesIO()
@@ -57,7 +63,7 @@ class GoogleSTTEngine(BaseSTTEngine):
                 [self.flac_bin, "-c", "--totally-silent", "-"],
                 input=wav_bytes,
                 capture_output=True,
-                timeout=4.0,
+                timeout=2.0,
             )
             if res.returncode == 0 and res.stdout:
                 return res.stdout
@@ -86,16 +92,16 @@ class GoogleSTTEngine(BaseSTTEngine):
             "User-Agent": "CyberJarvis-Voice/2.0",
         }
 
+        client = self._get_client()
         for lang in self.languages:
             url = f"https://www.google.com/speech-api/v2/recognize?client=chromium&lang={lang}&key={CHROMIUM_KEY}&pFilter=0"
             try:
-                with httpx.Client(timeout=self.timeout) as client:
-                    resp = client.post(url, content=payload, headers=headers)
-                    if resp.status_code == 200:
-                        text = self._parse_google_response(resp.text)
-                        if text:
-                            logger.info(f"Transcribed audio ({lang}): '{text}'")
-                            return text
+                resp = client.post(url, content=payload, headers=headers)
+                if resp.status_code == 200:
+                    text = self._parse_google_response(resp.text)
+                    if text:
+                        logger.info(f"Transcribed audio ({lang}): '{text}'")
+                        return text
             except Exception as ex:
                 logger.debug(f"STT request failed for {lang}: {ex}")
 

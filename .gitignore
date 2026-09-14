@@ -14,3 +14,4 @@ cyberjarvis.db
 .*.swp
 logs/
 *.log
+*.code-workspace

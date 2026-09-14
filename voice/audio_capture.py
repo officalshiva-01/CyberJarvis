@@ -128,9 +128,9 @@ class AudioCapture:
 
     def record_phrase(
         self,
-        timeout: float = 7.0,
-        phrase_time_limit: float = 10.0,
-        silence_timeout: float = 1.2,
+        timeout: float = 3.5,
+        phrase_time_limit: float = 6.0,
+        silence_timeout: float = 0.8,
     ) -> Tuple[Optional[bytes], str]:
         """
         Record a phrase from the microphone.
@@ -146,11 +146,12 @@ class AudioCapture:
         mic_start_time = time.perf_counter()
         vad_time_acc = 0.0
 
-        # Calibrate baseline ambient noise
+        # Calibrate baseline ambient noise quickly
         vad_calib_start = time.perf_counter()
-        ambient_baseline = self.calibrate_ambient_noise(duration=0.3)
+        ambient_baseline = self.calibrate_ambient_noise(duration=0.15)
         vad_time_acc += (time.perf_counter() - vad_calib_start)
-        speech_threshold = max(int(ambient_baseline * 1.5), 1200)
+        # Bounded adaptive threshold: sensitive to clear speech while filtering quiet room noise
+        speech_threshold = max(int(ambient_baseline * 1.25), 350)
 
         chunks: List[bytes] = []
         speech_started = False
