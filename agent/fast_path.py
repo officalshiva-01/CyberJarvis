@@ -57,9 +57,19 @@ class FastPathHandler:
         if any(p in text for p in ["who are you", "what are you", "what is cyberjarvis", "introduce yourself", "tum kaun ho"]):
             return self._handle_bot_identity_query()
 
-        # 1. Identity & Name questions
+        # 1a. Profile / Identity summary (Phase 5)
+        profile_match = any(p in text for p in [
+            "tell me about me", "tell me about myself", "who am i",
+            "describe me", "what do you know about me", "my profile",
+            "mere bare mein batao", "mere baare mein batao", "main kaun hoon",
+            "tell me my profile", "about me", "about myself",
+        ])
+        if profile_match:
+            return self._handle_profile_query()
+
+        # 1b. Identity & Name questions
         name_match = any(p in text for p in [
-            "what is my name", "what's my name", "who am i",
+            "what is my name", "what's my name",
             "mera naam kya hai", "tell me my name", "do you know my name"
         ])
         if name_match:
@@ -151,6 +161,85 @@ class FastPathHandler:
             return self._handle_uptime_query()
 
         return None
+
+    def _handle_profile_query(self) -> AgentResponse:
+        facts = get_facts(limit=50)
+
+        # 1. Name
+        name = None
+        for f in facts:
+            m = re.search(r"(?:my name is|i am|i'm)\s+([A-Za-z0-9_\-]+)", f, re.IGNORECASE)
+            if m:
+                name = m.group(1).strip()
+                break
+
+        if not name:
+            mems = search_memories("my name is", limit=5)
+            for m in mems:
+                m_res = re.search(r"my name is\s+([A-Za-z0-9_\-]+)", m[0], re.IGNORECASE)
+                if m_res:
+                    name = m_res.group(1).strip()
+                    break
+
+        # 2. Goal
+        goal = None
+        for f in facts:
+            m = re.search(r"(?:my goal is to|goal is to|my goal is|goal is)\s+(.+)", f, re.IGNORECASE)
+            if m:
+                g = m.group(1).strip().rstrip(".")
+                if g.lower().startswith("to "):
+                    g = g[3:].strip()
+                goal = g
+                break
+
+        # 3. Project
+        project = None
+        for f in facts:
+            m = re.search(r"(?:my project is|project is)\s+([A-Za-z0-9_\-]+)", f, re.IGNORECASE)
+            if m:
+                project = m.group(1).strip().rstrip(".")
+                break
+            elif "CyberJarvis" in f and "project" in f.lower():
+                project = "CyberJarvis"
+                break
+
+        # Generate response
+        if name and goal and project:
+            answer = f"You are **{name}**. Your current goal is to **{goal}**, and you are building **{project}**."
+            spoken = f"You are {name}. Your current goal is to {goal}, and you are building {project}."
+        elif not name and not goal and not project:
+            answer = "I do not have your profile details recorded in memory yet."
+            spoken = answer
+        else:
+            parts = []
+            missing = []
+            if name:
+                parts.append(f"You are **{name}**.")
+            else:
+                missing.append("name")
+
+            if goal:
+                parts.append(f"Your current goal is to **{goal}**.")
+            else:
+                missing.append("goal")
+
+            if project:
+                parts.append(f"You are building **{project}**.")
+            else:
+                missing.append("project")
+
+            if missing:
+                parts.append(f"Your {', '.join(missing)} information is not recorded in memory.")
+
+            answer = " ".join(parts)
+            spoken = re.sub(r"[*_`]", "", answer)
+
+        return AgentResponse(
+            answer=answer,
+            spoken_summary=spoken,
+            completed=True,
+            plan=AgentPlan(intent="profile", goal="Retrieve user profile from SQLite memory", steps=[]),
+        )
 
     def _handle_name_query(self) -> AgentResponse:
         facts = get_facts(limit=50)

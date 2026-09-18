@@ -220,6 +220,24 @@ class ExecutionRouter:
         if any(p in text for p in ["who are you", "what are you", "what is cyberjarvis", "introduce yourself", "tum kaun ho"]):
             return True
 
+        # Facts: Profile / Identity (Phase 5)
+        profile_phrases = [
+            "tell me about me",
+            "tell me about myself",
+            "who am i",
+            "describe me",
+            "what do you know about me",
+            "my profile",
+            "mere bare mein batao",
+            "mere baare mein batao",
+            "main kaun hoon",
+            "tell me my profile",
+            "about me",
+            "about myself",
+        ]
+        if any(p in text for p in profile_phrases):
+            return True
+
         # Facts: Name
         if any(p in text for p in ["what is my name", "what's my name", "who am i", "mera naam kya hai", "tell me my name", "do you know my name"]):
             return True

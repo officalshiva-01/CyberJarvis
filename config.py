@@ -21,6 +21,13 @@ REQUIRE_CONFIRMATION_FOR_MUTATING = True
 # Voice Engine Settings
 TTS_ENGINE = os.getenv("CYBERJARVIS_TTS", "spd-say")  # Options: spd-say, pyttsx3, none
 STT_ENGINE = os.getenv("CYBERJARVIS_STT", "speech_recognition") # Options: speech_recognition, text
+AUDIO_DEVICE = os.getenv("CYBERJARVIS_AUDIO_DEVICE", None)
+if AUDIO_DEVICE is not None:
+    try:
+        AUDIO_DEVICE = int(AUDIO_DEVICE)
+    except ValueError:
+        AUDIO_DEVICE = None
+
 
 # Timeout & Limit settings
 HTTP_TIMEOUT_SECONDS = 10.0

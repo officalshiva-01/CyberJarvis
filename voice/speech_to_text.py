@@ -28,6 +28,9 @@ class SpeechToText:
 
     def get_microphone_info(self) -> str:
         """Return human-readable diagnostic description of the active microphone."""
+        if hasattr(self.capture, "device_info") and self.capture.device_info:
+            dev = self.capture.device_info
+            return f"Microphone: {dev['name']} (Device ID: {dev['index']})"
         dev = AudioDeviceManager.get_default_input_device()
         if dev:
             return f"Microphone: {dev['name']} (Device ID: {dev['index']})"
