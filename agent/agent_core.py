@@ -62,19 +62,29 @@ class AgentCore:
             tool_results = self.executor.execute_plan(plan)
 
         # 4. Evaluation / Synthesis phase
-        self.on_status("📊 Analyzing...")
-        eval_start = time.perf_counter()
         facts = get_facts(limit=10)
-        response = self.evaluator.evaluate(
-            user_input=user_input_clean,
-            plan=plan,
-            results=tool_results,
-            context_facts=facts,
-        )
-        evaluator_ms = (time.perf_counter() - eval_start) * 1000
-        response.planning_ms = round(planning_ms, 2)
-        response.evaluator_ms = round(evaluator_ms, 2)
-        self.on_status("✅ Diagnosis ready" if "diagnose" in plan.intent else "✅ Complete")
+        if not tool_results:
+            logger.info("No tools executed. Skipping heavy evaluator synthesis.")
+            evaluator_ms = 0.0
+            response = self.evaluator._handle_chat_response(user_input_clean, facts)
+            response.plan = plan
+            response.tool_results = []
+            response.planning_ms = round(planning_ms, 2)
+            response.evaluator_ms = 0.0
+            self.on_status("✅ Complete")
+        else:
+            self.on_status("📊 Analyzing...")
+            eval_start = time.perf_counter()
+            response = self.evaluator.evaluate(
+                user_input=user_input_clean,
+                plan=plan,
+                results=tool_results,
+                context_facts=facts,
+            )
+            evaluator_ms = (time.perf_counter() - eval_start) * 1000
+            response.planning_ms = round(planning_ms, 2)
+            response.evaluator_ms = round(evaluator_ms, 2)
+            self.on_status("✅ Diagnosis ready" if "diagnose" in plan.intent else "✅ Complete")
 
         # 5. Persist to conversational state & long-term memory
         turn = Turn(

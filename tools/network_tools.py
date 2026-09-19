@@ -18,11 +18,11 @@ from security.policy import RiskLevel, PermissionLevel
     risk_level=RiskLevel.LOW,
 )
 def check_network_connectivity(host: str = "1.1.1.1", port: int = 53) -> Dict[str, Any]:
+    sock = None
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(3.0)
+        sock.settimeout(1.5)
         sock.connect((host, port))
-        sock.close()
         return {
             "connected": True,
             "target": f"{host}:{port}",
@@ -34,6 +34,12 @@ def check_network_connectivity(host: str = "1.1.1.1", port: int = 53) -> Dict[st
             "target": f"{host}:{port}",
             "status": f"Unreachable ({type(ex).__name__}): {ex}",
         }
+    finally:
+        if sock:
+            try:
+                sock.close()
+            except Exception:
+                pass
 
 
 @registry.register(
@@ -47,7 +53,9 @@ def check_network_connectivity(host: str = "1.1.1.1", port: int = 53) -> Dict[st
     risk_level=RiskLevel.LOW,
 )
 def check_dns_resolution(domain: str = "github.com") -> Dict[str, Any]:
+    old_timeout = socket.getdefaulttimeout()
     try:
+        socket.setdefaulttimeout(1.5)
         resolved_ip = socket.gethostbyname(domain)
         return {
             "success": True,
@@ -60,6 +68,8 @@ def check_dns_resolution(domain: str = "github.com") -> Dict[str, Any]:
             "domain": domain,
             "error": str(ex),
         }
+    finally:
+        socket.setdefaulttimeout(old_timeout)
 
 
 @registry.register(

@@ -57,7 +57,11 @@ class TerminalDashboard:
                 else (
                     "DIAGNOSTIC"
                     if result.route == "diagnostic_path"
-                    else ("CLARIFICATION" if result.route == "clarification" else "AGENT")
+                    else (
+                        "INFORMATION"
+                        if result.route == "information_path"
+                        else ("CLARIFICATION" if result.route == "clarification" else "AGENT")
+                    )
                 )
             )
         print(f"Execution Path:\n{exec_path}\n")
@@ -66,6 +70,8 @@ class TerminalDashboard:
             route_label = "⚡ FAST PATH (Deterministic)"
         elif exec_path == "DIAGNOSTIC":
             route_label = "🔍 DIAGNOSTIC PATH (Deterministic Parallel)"
+        elif exec_path == "INFORMATION":
+            route_label = "💡 INFORMATION PATH (Direct LLM Response)"
         elif exec_path == "CLARIFICATION":
             route_label = "🤔 CLARIFICATION (Incomplete Command Guard)"
         else:

@@ -271,10 +271,17 @@ class Evaluator:
     ) -> AgentResponse:
         tool_data = []
         for r in results:
+            raw_out = r.output if r.success else r.error
+            out_str = str(raw_out)
+            # Bound tool evidence to prevent large prompt bloating
+            if len(out_str) > 400:
+                truncated_out = out_str[:397] + "..."
+            else:
+                truncated_out = raw_out
             tool_data.append({
                 "tool": r.tool_name,
                 "success": r.success,
-                "output": r.output if r.success else r.error,
+                "output": truncated_out,
             })
 
         code_requested = is_code_requested(user_input)
@@ -300,7 +307,10 @@ class Evaluator:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
                 ],
-                options={"temperature": 0.1},
+                options={
+                    "temperature": 0.1,
+                    "num_predict": 250,
+                },
             )
             raw = resp.get("message", {}).get("content", "")
 
@@ -317,6 +327,7 @@ class Evaluator:
                 if (not code_requested and contains_hallucinated_code(ans)) or contains_unrelated_devops_lecture(ans, user_input):
                     return self._deterministic_fallback_synthesis(plan, results)
                 spoken = parsed.get("spoken_summary", ans[:150])
+                spoken = re.sub(r"[*_`#]", "", spoken).strip()
                 return AgentResponse(
                     answer=ans,
                     spoken_summary=spoken,
@@ -325,9 +336,25 @@ class Evaluator:
                     completed=True,
                 )
 
+            # Fallback if raw text contains markdown fences or JSON keys
+            clean_raw = re.sub(r"```(?:json)?\s*|```", "", raw).strip()
+            ans_m = re.search(r"['\"]?answer['\"]?\s*:\s*['\"](.*?)(?:['\"],?\s*['\"]?spoken_summary|$)", clean_raw, re.DOTALL)
+            spk_m = re.search(r"['\"]?spoken_summary['\"]?\s*:\s*['\"]([^'\"]+)", clean_raw)
+            if ans_m:
+                extracted_ans = ans_m.group(1).encode().decode('unicode_escape', errors='ignore').strip()
+                extracted_spk = spk_m.group(1).strip() if spk_m else extracted_ans[:150]
+                return AgentResponse(
+                    answer=extracted_ans,
+                    spoken_summary=re.sub(r"[*_`#]", "", extracted_spk).strip(),
+                    plan=plan,
+                    tool_results=results,
+                    completed=True,
+                )
+
+            spoken_clean = re.sub(r"```(?:json)?\s*|```|[{}\"']", "", raw)[:150].strip()
             return AgentResponse(
                 answer=raw,
-                spoken_summary=raw[:150],
+                spoken_summary=spoken_clean,
                 plan=plan,
                 tool_results=results,
                 completed=True,
@@ -387,7 +414,7 @@ class Evaluator:
                     {"role": "system", "content": system_content},
                     {"role": "user", "content": user_input},
                 ],
-                options={"temperature": 0.1},
+                options={"temperature": 0.1, "num_predict": 150},
             )
             reply = resp.get("message", {}).get("content", "")
 

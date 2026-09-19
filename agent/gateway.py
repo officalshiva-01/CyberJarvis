@@ -18,6 +18,7 @@ from agent.schemas import AgentResponse, AgentPlan
 from agent.router import ExecutionRouter, RouteType, normalize_transcript, is_incomplete_transcript
 from agent.fast_path import FastPathHandler
 from agent.diagnostic_path import DiagnosticPathHandler
+from agent.information_path import InformationPathHandler
 from agent.agent_core import AgentCore
 from observability.logging import get_logger
 
@@ -62,7 +63,7 @@ class LatencyBreakdown(BaseModel):
         stt_s = f"{self.stt_ms / 1000.0:.1f}s"
         router_s = f"{self.router_ms / 1000.0:.1f}s" if self.router_ms >= 100 else (f"{self.router_ms:.1f}ms" if self.router_ms > 0 else "0.0s")
         planner_s = f"{self.planning_ms / 1000.0:.1f}s" if self.planning_ms > 0 else "SKIPPED"
-        tools_s = f"{self.tools_ms / 1000.0:.1f}s"
+        tools_s = f"{self.tools_ms / 1000.0:.1f}s" if self.tools_ms > 0 else "0.0s"
         analysis_s = f"{self.analysis_ms / 1000.0:.1f}s" if self.analysis_ms >= 100 else (f"{self.analysis_ms:.1f}ms" if self.analysis_ms > 0 else ("0.0s" if self.planning_ms == 0 else "SKIPPED"))
         evaluator_s = f"{self.evaluator_ms / 1000.0:.1f}s" if self.evaluator_ms > 0 else "SKIPPED"
         tts_s = f"{self.tts_ms / 1000.0:.1f}s"
@@ -85,10 +86,10 @@ class LatencyBreakdown(BaseModel):
 
 class GatewayResult(BaseModel):
     response: AgentResponse
-    route: str  # "fast_path", "diagnostic_path", "agent_path"
+    route: str  # "fast_path", "diagnostic_path", "information_path", "agent_path"
     latency: LatencyBreakdown
     source: str = "terminal"
-    execution_path: str = "FAST"  # "FAST", "DIAGNOSTIC", "AGENT"
+    execution_path: str = "FAST"  # "FAST", "DIAGNOSTIC", "INFORMATION", "AGENT", "CLARIFICATION"
 
 
 class AgentGateway:
@@ -99,6 +100,7 @@ class AgentGateway:
         agent_core: Optional[AgentCore] = None,
         fast_path: Optional[FastPathHandler] = None,
         diagnostic_path: Optional[DiagnosticPathHandler] = None,
+        information_path: Optional[InformationPathHandler] = None,
         router: Optional[ExecutionRouter] = None,
         on_status_change: Optional[Callable[[str], None]] = None,
     ):
@@ -106,6 +108,7 @@ class AgentGateway:
         self.router = router or ExecutionRouter()
         self.fast_path = fast_path or FastPathHandler()
         self.diagnostic_path = diagnostic_path or DiagnosticPathHandler(on_status_change=self.on_status)
+        self.information_path = information_path or InformationPathHandler()
         self.agent_core = agent_core or AgentCore(on_status_change=self.on_status)
 
     def process_user_request(
@@ -220,7 +223,29 @@ class AgentGateway:
                 execution_path="DIAGNOSTIC",
             )
 
-        # 3. Tier 3 — True Agent Path (Ollama LLM Planner -> Parallel Executor -> Grounded Evaluator)
+        # 3. Tier 3b — Information / Direct LLM Path (Single focused response, 0 tools, 0 planner, 0 evaluator)
+        if route_decision == RouteType.INFORMATION:
+            logger.info("Routing command to Tier 3b Information Path...")
+            info_response, llm_ms = self.information_path.handle(clean_input)
+
+            total_duration = breakdown.stt_ms + (time.perf_counter() - start_time) * 1000
+            breakdown.total_ms = round(total_duration, 2)
+            breakdown.tools_ms = 0.0
+            breakdown.planning_ms = 0.0
+            breakdown.evaluator_ms = 0.0
+            breakdown.analysis_ms = round(llm_ms, 2)
+            breakdown.execution_path = "INFORMATION"
+
+            logger.info(f"Command handled via Information Path in {breakdown.total_ms}ms (llm={llm_ms:.1f}ms)")
+            return GatewayResult(
+                response=info_response,
+                route="information_path",
+                latency=breakdown,
+                source=source,
+                execution_path="INFORMATION",
+            )
+
+        # 4. Tier 3a — True Agent Path (Ollama LLM Planner -> Parallel Executor -> Grounded Evaluator)
         logger.info("Routing command to Tier 3 True Agent Path...")
         agent_response = self.agent_core.process(clean_input)
 

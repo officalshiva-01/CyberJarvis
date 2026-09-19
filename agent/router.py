@@ -15,6 +15,7 @@ logger = get_logger("CyberJarvis.Router")
 class RouteType(str, Enum):
     FAST = "FAST"
     DIAGNOSTIC = "DIAGNOSTIC"
+    INFORMATION = "INFORMATION"
     AGENT = "AGENT"
     CLARIFICATION = "CLARIFICATION"
 
@@ -226,10 +227,84 @@ class ExecutionRouter:
             return RouteType.FAST
 
         # -------------------------------------------------------------
-        # Tier 3: TRUE AGENT PATH (Complex reasoning, planning, multi-step tasks)
+        # Tier 3a: TRUE AGENT PATH (Local system, architecture, codebase, file inspection/mutation)
         # -------------------------------------------------------------
-        logger.info(f"Router classified as AGENT: '{user_input}' -> '{normalized}'")
-        return RouteType.AGENT
+        if self._is_agent_query(normalized, clean_tokens):
+            logger.info(f"Router classified as AGENT: '{user_input}' -> '{normalized}'")
+            return RouteType.AGENT
+
+        # -------------------------------------------------------------
+        # Tier 3b: INFORMATION / DIRECT-LLM PATH (Conceptual, educational, general knowledge)
+        # -------------------------------------------------------------
+        if self._is_information_query(normalized, clean_tokens):
+            logger.info(f"Router classified as INFORMATION: '{user_input}' -> '{normalized}'")
+            return RouteType.INFORMATION
+
+        # Default for unclassified open-ended queries is INFORMATION (lightweight, zero tools)
+        logger.info(f"Router classified as default INFORMATION: '{user_input}' -> '{normalized}'")
+        return RouteType.INFORMATION
+
+    def _is_agent_query(self, text: str, tokens: Set[str]) -> bool:
+        """Check for genuine agentic tasks requiring local tools, planning, and evaluation."""
+        # Queries explicitly targeting local project, codebase, or multi-step execution
+        agent_phrases = [
+            "architectur",
+            "subsystem",
+            "project structure",
+            "codebase",
+            "refactor",
+            "deployment",
+            "deploy",
+            "repository",
+            "repo",
+            "inspect files",
+            "diagnose repository",
+            "multi-step",
+            "deadlock",
+            "diagnostic log",
+        ]
+
+        # If it's a general informational question ("what is github", "explain repository"), don't treat as agent
+        info_starters = ("what is ", "what are ", "explain ", "how to ", "how do i ", "how can i ", "how should i ", "tell me about ", "define ")
+        has_local_context = any(w in text for w in ["my ", "our ", "this project", "cyberjarvis", "local", "here", "work tree"])
+
+        if any(text.startswith(s) for s in info_starters) and not has_local_context:
+            return False
+
+        if any(p in text for p in agent_phrases):
+            return True
+
+        # 2. File / Code mutations or multi-step execution tasks
+        if any(w in text for w in ["git branch", "git commit", "git diff", "git log", "recent commits"]):
+            return True
+
+        if any(w in text for w in ["search files", "find files", "run tests", "execute script"]):
+            return True
+
+        return False
+
+    def _is_information_query(self, text: str, tokens: Set[str]) -> bool:
+        """Check for informational, conceptual, or educational questions that do not require tools."""
+        # Common informational query starters
+        if any(text.startswith(p) for p in [
+            "how to", "how do i", "how can i", "how should i", "how would i",
+            "explain", "what is", "what are", "what does", "define",
+            "why is", "why does", "tell me about", "describe",
+            "difference between", "comparison between", "compare",
+            "can you explain", "give me advice", "tips for", "guide to",
+            "roadmap", "tutorial", "best practices",
+        ]):
+            return True
+
+        # Learning & Career queries
+        if any(w in text for w in [
+            "become a developer", "become developer", "learn programming",
+            "learn coding", "learn backend", "learn frontend", "learn devops",
+            "learn python", "learn go", "learn rust", "career",
+        ]):
+            return True
+
+        return False
 
     def _is_diagnostic_query(self, text: str, tokens: Set[str]) -> bool:
         """Check for known diagnostic or troubleshooting queries."""

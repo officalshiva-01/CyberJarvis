@@ -209,11 +209,37 @@ def run_device_inspection():
     AudioDeviceManager.inspect_all_devices(record_duration=2.0)
 
 
+def run_single_command(command: str, model: str = DEFAULT_MODEL, enable_voice_output: bool = False):
+    """Run a single command non-interactively, render dashboard, and exit."""
+    init_db()
+    tts = TextToSpeech() if enable_voice_output else None
+
+    def on_status_change(status_text: str):
+        print(f"  ⏳ {status_text}")
+
+    gateway = AgentGateway(on_status_change=on_status_change)
+    TerminalDashboard.print_banner(mode="ONE-SHOT COMMAND", model=model)
+
+    try:
+        result = gateway.process_user_request(command, source="terminal")
+        if tts and result.response.spoken_summary:
+            tts_start = time.perf_counter()
+            tts.speak(result.response.spoken_summary, blocking=False)
+            tts_duration_ms = (time.perf_counter() - tts_start) * 1000
+            result.latency.tts_ms = round(tts_duration_ms, 2)
+            result.latency.total_ms = round(result.latency.total_ms + tts_duration_ms, 2)
+        TerminalDashboard.render_agent_turn(command, result)
+    except Exception as error:
+        logger.error(f"Error processing command: {error}", exc_info=True)
+        print(f"\n❌ Error: {error}\n")
+
+
 def main():
     parser = argparse.ArgumentParser(description="CyberJarvis Local AI Diagnostic Agent")
     parser.add_argument("--voice", "-v", action="store_true", help="Start in voice-controlled interactive mode")
     parser.add_argument("--no-tts", action="store_true", help="Disable voice output in terminal mode")
     parser.add_argument("--diagnose", "-d", action="store_true", help="Run immediate hardware & process diagnosis")
+    parser.add_argument("--command", "-c", type=str, default=None, help="Execute a single command non-interactively")
     parser.add_argument("--audio-test", action="store_true", help="Run 3-second raw audio capture diagnostic test")
     parser.add_argument("--keep-audio", action="store_true", help="Keep temporary WAV audio file from --audio-test")
     parser.add_argument("--inspect-devices", action="store_true", help="Inspect and probe all available input devices")
@@ -227,6 +253,8 @@ def main():
         run_audio_test(keep_audio=args.keep_audio)
     elif args.diagnose:
         run_one_shot_diagnosis()
+    elif args.command:
+        run_single_command(command=args.command, model=args.model, enable_voice_output=not args.no_tts)
     elif args.voice:
         loop = VoiceAssistantLoop(model=args.model)
         loop.run()
