@@ -87,8 +87,50 @@ def convert_stereo_to_mono(stereo_bytes: bytes) -> bytes:
         return stereo_bytes
 
 
+def resample_pcm16_mono(pcm_bytes: bytes, in_rate: int, out_rate: int) -> bytes:
+    """
+    Cleanly resample 16-bit mono PCM audio from in_rate to out_rate using linear interpolation.
+    Deterministic, fast, zero-dependency.
+    """
+    if in_rate == out_rate or not pcm_bytes:
+        return pcm_bytes
+    in_samples = len(pcm_bytes) // 2
+    if in_samples == 0:
+        return b""
+    shorts = struct.unpack(f"<{in_samples}h", pcm_bytes[:in_samples * 2])
+    out_samples = int(in_samples * out_rate / in_rate)
+    if out_samples == 0:
+        return b""
+    ratio = (in_samples - 1) / max(1, out_samples - 1)
+
+    out = []
+    for i in range(out_samples):
+        src_pos = i * ratio
+        src_idx = int(src_pos)
+        frac = src_pos - src_idx
+        s1 = shorts[src_idx]
+        s2 = shorts[src_idx + 1] if src_idx + 1 < in_samples else s1
+        val = int(s1 + frac * (s2 - s1))
+        out.append(max(-32768, min(32767, val)))
+    return struct.pack(f"<{len(out)}h", *out)
+
+
 class AudioDeviceManager:
     """Manages audio devices, physical discovery, and queries PipeWire/ALSA hardware."""
+
+    VERIFIED_PHYSICAL_PATTERNS = [
+        "alc3246",
+        "hw:0,0",
+        "hda intel pch",
+    ]
+    VIRTUAL_DEVICE_PATTERNS = [
+        "sysdefault",
+        "default",
+        "dmix",
+        "pulse",
+        "pipewire",
+        "null",
+    ]
 
     @staticmethod
     def get_input_devices() -> List[Dict[str, Any]]:
@@ -160,21 +202,18 @@ class AudioDeviceManager:
     @staticmethod
     def select_input_device() -> Optional[Dict[str, Any]]:
         """
-        Microphone selection strategy (Phase 2):
-        1. Explicit configured device if provided (CYBERJARVIS_AUDIO_DEVICE).
-        2. Otherwise choose real input device with:
-           - 1-2 usable input channels
-           - valid default samplerate
-           - successful short capture
-           - non-zero signal
-        Prefer actual physical microphone over virtual/default aggregate device.
-        Keep automatic discovery as default.
+        Microphone selection strategy (Strict 4-tier priority):
+        1. CYBERJARVIS_AUDIO_DEVICE environment override
+        2. Previously verified physical input device (e.g. ALC3246, hw:0,0)
+        3. Physical ALSA device with 1-2 input channels (not virtual wrappers)
+        4. System default only as final fallback
+        Never blindly choose sd.default.device[0].
         """
         input_devs = AudioDeviceManager.get_input_devices()
         if not input_devs:
             return None
 
-        # 1. Configured device override
+        # 1. Configured device override (CYBERJARVIS_AUDIO_DEVICE or config.AUDIO_DEVICE)
         env_val = os.getenv("CYBERJARVIS_AUDIO_DEVICE")
         cfg_val = AUDIO_DEVICE
         override = env_val if env_val is not None else cfg_val
@@ -183,39 +222,48 @@ class AudioDeviceManager:
                 target_idx = int(override)
                 for d in input_devs:
                     if d["index"] == target_idx:
-                        logger.info(f"Selected audio device {target_idx} via explicit configuration.")
+                        logger.info(f"Selected audio device {target_idx} via explicit configuration override.")
                         return d
             except (ValueError, TypeError):
                 pass
 
-        # 2. Prefer physical microphones: 1-2 channels, not virtual/aggregate
-        physical = []
-        virtual = []
+        # 2. Previously verified physical input device
         for d in input_devs:
-            name = d.get("name", "").lower()
+            name_lower = d.get("name", "").lower()
+            is_virtual = any(v in name_lower for v in AudioDeviceManager.VIRTUAL_DEVICE_PATTERNS)
+            if not is_virtual and any(p in name_lower for p in AudioDeviceManager.VERIFIED_PHYSICAL_PATTERNS):
+                ok, rms, peak, has_signal = AudioDeviceManager.probe_device(d["index"], duration=0.2)
+                if ok:
+                    logger.info(f"Selected verified physical microphone: {d['name']} (Device ID: {d['index']})")
+                    return d
+
+        # 3. Physical ALSA device with 1-2 input channels
+        physical_candidates = []
+        for d in input_devs:
+            name_lower = d.get("name", "").lower()
             ch = d.get("channels", 0)
-            if 1 <= ch <= 2 and not any(v in name for v in ["sysdefault", "default", "dmix"]):
-                physical.append(d)
-            else:
-                virtual.append(d)
+            is_virtual = any(v in name_lower for v in AudioDeviceManager.VIRTUAL_DEVICE_PATTERNS)
+            if 1 <= ch <= 2 and not is_virtual:
+                physical_candidates.append(d)
 
-        # Probe physical candidate devices
-        for d in physical:
-            ok, rms, peak, has_signal = AudioDeviceManager.probe_device(d["index"], duration=0.6)
+        # First pass: prefer physical candidate with signal
+        for d in physical_candidates:
+            ok, rms, peak, has_signal = AudioDeviceManager.probe_device(d["index"], duration=0.3)
             if ok and has_signal:
-                logger.info(f"Auto-selected physical microphone: {d['name']} (Device ID: {d['index']})")
+                logger.info(f"Auto-selected responsive physical microphone: {d['name']} (Device ID: {d['index']})")
                 return d
 
-        # Probe virtual/aggregate devices if physical failed
-        for d in virtual:
-            ok, rms, peak, has_signal = AudioDeviceManager.probe_device(d["index"], duration=0.6)
-            if ok and has_signal:
-                logger.info(f"Auto-selected virtual audio device: {d['name']} (Device ID: {d['index']})")
+        # Second pass: accept any physical candidate that opened successfully
+        for d in physical_candidates:
+            ok, rms, peak, has_signal = AudioDeviceManager.probe_device(d["index"], duration=0.2)
+            if ok:
+                logger.info(f"Auto-selected physical ALSA microphone: {d['name']} (Device ID: {d['index']})")
                 return d
 
-        # Fallback to system default or first available device
+        # 4. System default only as final fallback
         for d in input_devs:
             if d.get("is_default"):
+                logger.warning(f"Falling back to system default audio device: {d['name']} (Device ID: {d['index']})")
                 return d
         return input_devs[0]
 

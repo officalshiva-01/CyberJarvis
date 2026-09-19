@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any
 import httpx
 
+from voice.audio_capture import resample_pcm16_mono
 from observability.logging import get_logger
 
 logger = get_logger("CyberJarvis.STTEngine")
@@ -74,6 +75,11 @@ class GoogleSTTEngine(BaseSTTEngine):
     def transcribe(self, pcm_data: bytes, sample_rate: int = 16000) -> Optional[str]:
         if not pcm_data:
             return None
+
+        # Cleanly resample to 16000 Hz if hardware captured at another rate
+        if sample_rate != 16000:
+            pcm_data = resample_pcm16_mono(pcm_data, sample_rate, 16000)
+            sample_rate = 16000
 
         wav_bytes = self._pcm_to_wav(pcm_data, sample_rate)
         flac_bytes = self._encode_to_flac(wav_bytes)

@@ -16,6 +16,7 @@ class RouteType(str, Enum):
     FAST = "FAST"
     DIAGNOSTIC = "DIAGNOSTIC"
     AGENT = "AGENT"
+    CLARIFICATION = "CLARIFICATION"
 
 
 # Precompiled word sets and phrases
@@ -40,6 +41,58 @@ WAKE_PREFIXES = [
     r"^jarvis[\s,:\-]*",
 ]
 
+INCOMPLETE_EXACT_FRAGMENTS: Set[str] = {
+    "",
+    "what",
+    "what is",
+    "whats",
+    "what's",
+    "how",
+    "how is",
+    "why",
+    "why is",
+    "who",
+    "who is",
+    "tell me",
+    "tell me about",
+    "check",
+    "check my",
+    "diagnose",
+    "diagnose my",
+    "and diagnose",
+    "and check",
+    "analyze",
+    "analyze my",
+    "analyse",
+    "analyse my",
+    "and",
+    "also",
+    "please",
+    "so",
+    "then",
+    "uh",
+    "um",
+    "can you",
+    "could you",
+    "is",
+    "are",
+    "which",
+    "where",
+    "where is",
+    "when",
+    "when is",
+    "look at",
+    "show",
+    "show me",
+    "list",
+}
+
+ALLOWED_SINGLE_WORDS: Set[str] = {
+    "exit", "quit", "bye", "goodbye", "stop", "terminate",
+    "hello", "hi", "hey", "namaste", "greetings", "yo",
+    "time", "date", "uptime", "pwd",
+}
+
 
 def normalize_transcript(text: str) -> str:
     """
@@ -47,6 +100,8 @@ def normalize_transcript(text: str) -> str:
     - lowercase
     - trim whitespace & collapse repeated whitespace
     - remove harmless wake words ("cyberjarvis", "hey cyberjarvis", "okay cyberjarvis", etc.)
+    - remove harmless leading conjunctions/fillers ("and", "also", "okay", "ok", "so", "then", "please", "uh", "um")
+    - normalize speech artifacts like 'diagnosis my computer' -> 'diagnose my computer'
     - strip leading/trailing punctuation (. , ? ! : ; - ' ")
     """
     if not text:
@@ -55,19 +110,72 @@ def normalize_transcript(text: str) -> str:
     # 1. Lowercase and collapse spaces
     cleaned = re.sub(r"\s+", " ", text.lower()).strip()
 
-    # 2. Strip wake words in priority order
-    for pat in WAKE_PREFIXES:
-        new_cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE).strip()
+    # 2. Strip wake words and leading conjunctions/fillers in loop
+    changed = True
+    while changed:
+        changed = False
+        # Strip wake words
+        for pat in WAKE_PREFIXES:
+            new_cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE).strip()
+            if new_cleaned != cleaned:
+                cleaned = new_cleaned
+                changed = True
+                break
+        # Strip leading conjunctions/fillers (only at start of command)
+        new_cleaned = re.sub(r"^(?:and|also|okay|ok|so|then|please|uh|um)\b[\s,:\-]*", "", cleaned, flags=re.IGNORECASE).strip()
         if new_cleaned != cleaned:
             cleaned = new_cleaned
-            break
+            changed = True
 
-    # 3. Strip leading and trailing punctuation
+    # 3. Speech artifact recovery: "diagnosis my computer" -> "diagnose my computer"
+    cleaned = re.sub(r"\bdiagnosis\s+(my\s+)?(computer|system|pc|laptop)\b", r"diagnose \1\2", cleaned)
+
+    # 4. Strip leading and trailing punctuation
     cleaned = re.sub(r"^[\s,:\-.?!'\"]+", "", cleaned)
     cleaned = re.sub(r"[\s,:\-.?!'\"]+$", "", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
 
     return cleaned
+
+
+def is_incomplete_transcript(text: str) -> bool:
+    """
+    Validates whether an STT transcript is obviously incomplete or a trailing fragment.
+    Incomplete commands must return a clarification state and NEVER trigger expensive reasoning (Ollama).
+    """
+    if not text:
+        return True
+
+    raw_clean = re.sub(r"[^\w\s]", "", text.lower()).strip()
+    if not raw_clean or raw_clean in INCOMPLETE_EXACT_FRAGMENTS:
+        return True
+
+    norm = normalize_transcript(text)
+    if not norm or norm in INCOMPLETE_EXACT_FRAGMENTS:
+        return True
+
+    norm_clean = re.sub(r"[^\w\s]", "", norm).strip()
+    if not norm_clean or norm_clean in INCOMPLETE_EXACT_FRAGMENTS:
+        return True
+
+    tokens = norm_clean.split()
+    if not tokens:
+        return True
+
+    # Single-word guard: only specific whitelist words are valid standalone commands
+    if len(tokens) == 1 and tokens[0] not in ALLOWED_SINGLE_WORDS:
+        return True
+
+    # Incomplete prefix patterns:
+    # 1. Dangling question starters: "what is", "why is", "how is", "where is", etc.
+    if re.match(r"^(?:what|why|who|how|where|when)\s+(?:is|are|was|were|do|does|did|can|could|am)$", norm_clean):
+        return True
+
+    # 2. Dangling command starters: "tell me about", "check my", "diagnose my", etc.
+    if re.match(r"^(?:tell\s+me\s+about|check\s+my|diagnose\s+my|analyze\s+my|analyse\s+my|look\s+at)$", norm_clean):
+        return True
+
+    return False
 
 
 class ExecutionRouter:
@@ -86,16 +194,20 @@ class ExecutionRouter:
 
     def classify(self, user_input: str) -> RouteType:
         """
-        Classify input into RouteType.FAST, RouteType.DIAGNOSTIC, or RouteType.AGENT.
+        Classify input into RouteType.FAST, RouteType.DIAGNOSTIC, RouteType.AGENT, or RouteType.CLARIFICATION.
         Executed before any Ollama planner call.
         """
+        # Guard: Incomplete transcripts immediately route to CLARIFICATION
+        if is_incomplete_transcript(user_input):
+            logger.info(f"Router classified as CLARIFICATION: '{user_input}'")
+            return RouteType.CLARIFICATION
+
         # Normalize transcript before routing
         normalized = normalize_transcript(user_input)
         if not normalized:
-            # Fall back to raw text if normalization cleared it entirely
             normalized = user_input.lower().strip()
-            if not normalized:
-                return RouteType.FAST
+            if not normalized or is_incomplete_transcript(normalized):
+                return RouteType.CLARIFICATION
 
         clean_tokens = set(re.sub(r"[^\w\s]", "", normalized).split())
 
@@ -217,7 +329,7 @@ class ExecutionRouter:
             return True
 
         # Assistant identity
-        if any(p in text for p in ["who are you", "what are you", "what is cyberjarvis", "introduce yourself", "tum kaun ho"]):
+        if any(p in text for p in ["who are you", "what are you", "what is cyberjarvis", "introduce yourself", "tum kaun ho", "what is your name", "what's your name", "tumhara naam kya hai"]):
             return True
 
         # Facts: Profile / Identity (Phase 5)

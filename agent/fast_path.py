@@ -54,7 +54,7 @@ class FastPathHandler:
             return self._handle_greeting_query()
 
         # 0c. Assistant Identity
-        if any(p in text for p in ["who are you", "what are you", "what is cyberjarvis", "introduce yourself", "tum kaun ho"]):
+        if any(p in text for p in ["who are you", "what are you", "what is cyberjarvis", "introduce yourself", "tum kaun ho", "what is your name", "what's your name", "tumhara naam kya hai"]):
             return self._handle_bot_identity_query()
 
         # 1a. Profile / Identity summary (Phase 5)

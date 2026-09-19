@@ -12,7 +12,12 @@ class TerminalDashboard:
     """Renders formatted ASCII/Unicode command center interface."""
 
     @staticmethod
-    def print_banner(mode: str = "TERMINAL", model: str = DEFAULT_MODEL, mic_info: Optional[str] = None):
+    def print_banner(
+        mode: str = "TERMINAL",
+        model: str = DEFAULT_MODEL,
+        mic_info: Optional[str] = None,
+        audio_details: Optional[Dict[str, Any]] = None,
+    ):
         print("\n" + "=" * 62)
         print("                   🤖 CYBERJARVIS")
         print("             LOCAL AI DIAGNOSTIC AGENT")
@@ -20,7 +25,17 @@ class TerminalDashboard:
         print(f"  🎤 MODE    : {mode}")
         print(f"  🧠 MODEL   : Ollama / {model}")
         print(f"  🟢 STATUS  : ONLINE & READY")
-        if mic_info:
+        if audio_details and isinstance(audio_details, dict):
+            sr_val = audio_details.get("samplerate", 44100)
+            try:
+                sr_display = f"{int(sr_val)} Hz"
+            except (ValueError, TypeError):
+                sr_display = f"{sr_val} Hz"
+            print("  🎙️ AUDIO:")
+            print(f"     Device: {audio_details.get('name', 'Unknown')}")
+            print(f"     ID: {audio_details.get('index', 0)}")
+            print(f"     Sample Rate: {sr_display}")
+        elif mic_info:
             print(f"  🎙️ AUDIO   : {mic_info}")
         print("=" * 62 + "\n")
 
@@ -36,13 +51,23 @@ class TerminalDashboard:
         # Execution Path & Route indication
         exec_path = getattr(result, "execution_path", None)
         if not exec_path:
-            exec_path = "FAST" if result.route == "fast_path" else ("DIAGNOSTIC" if result.route == "diagnostic_path" else "AGENT")
+            exec_path = (
+                "FAST"
+                if result.route == "fast_path"
+                else (
+                    "DIAGNOSTIC"
+                    if result.route == "diagnostic_path"
+                    else ("CLARIFICATION" if result.route == "clarification" else "AGENT")
+                )
+            )
         print(f"Execution Path:\n{exec_path}\n")
 
         if exec_path == "FAST":
             route_label = "⚡ FAST PATH (Deterministic)"
         elif exec_path == "DIAGNOSTIC":
             route_label = "🔍 DIAGNOSTIC PATH (Deterministic Parallel)"
+        elif exec_path == "CLARIFICATION":
+            route_label = "🤔 CLARIFICATION (Incomplete Command Guard)"
         else:
             route_label = "🧠 AGENT PATH (LLM Reasoning)"
         print(f"⚙️ ROUTE: {route_label}")

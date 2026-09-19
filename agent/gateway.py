@@ -15,7 +15,7 @@ from typing import Optional, Callable, Dict, Any
 from pydantic import BaseModel, Field
 
 from agent.schemas import AgentResponse, AgentPlan
-from agent.router import ExecutionRouter, RouteType, normalize_transcript
+from agent.router import ExecutionRouter, RouteType, normalize_transcript, is_incomplete_transcript
 from agent.fast_path import FastPathHandler
 from agent.diagnostic_path import DiagnosticPathHandler
 from agent.agent_core import AgentCore
@@ -28,6 +28,7 @@ class LatencyBreakdown(BaseModel):
     mic_capture_ms: float = 0.0
     vad_ms: float = 0.0
     stt_ms: float = 0.0
+    normalization_ms: float = 0.0
     router_ms: float = 0.0
     fast_path_ms: float = 0.0
     planning_ms: float = 0.0
@@ -121,16 +122,19 @@ class AgentGateway:
         """
         start_time = time.perf_counter()
 
-        # 0a. Normalize input (lowercase, trim, collapse whitespace, strip harmless wake words)
+        # 0a. Normalize input (lowercase, trim, collapse whitespace, strip harmless wake words & conjunctions)
+        norm_start = time.perf_counter()
         clean_input = normalize_transcript(user_input)
         if not clean_input:
             clean_input = user_input.strip()
+        norm_ms = (time.perf_counter() - norm_start) * 1000
 
         logger.info(f"Gateway process_user_request [{source}]: raw='{user_input}' -> normalized='{clean_input}'")
         breakdown = LatencyBreakdown(
             stt_ms=round(stt_latency_ms, 2),
             mic_capture_ms=round(mic_capture_ms, 2),
             vad_ms=round(vad_ms, 2),
+            normalization_ms=round(norm_ms, 2),
         )
 
         # 0b. Route Classification (Deterministic & executed BEFORE any LLM call)
@@ -138,6 +142,35 @@ class AgentGateway:
         route_decision = self.router.classify(clean_input)
         router_ms = (time.perf_counter() - router_start) * 1000
         breakdown.router_ms = round(router_ms, 2)
+
+        # 0c. Incomplete Transcript Guard (Section 3, 5, 7, 8, 9 - Zero LLM call)
+        if (
+            route_decision == RouteType.CLARIFICATION
+            or is_incomplete_transcript(clean_input)
+            or is_incomplete_transcript(user_input)
+        ):
+            logger.info(f"Incomplete command detected: '{user_input}' -> '{clean_input}'")
+            clarification_response = AgentResponse(
+                answer="🤔 I didn't catch the full command.\n🎤 Please repeat.",
+                spoken_summary="I didn't catch the full command. Please repeat.",
+                completed=True,
+                planning_ms=0.0,
+                evaluator_ms=0.0,
+                plan=AgentPlan(intent="clarification", goal="Request user repeat incomplete command", steps=[]),
+            )
+            total_duration = breakdown.stt_ms + (time.perf_counter() - start_time) * 1000
+            breakdown.total_ms = round(total_duration, 2)
+            breakdown.execution_path = "CLARIFICATION"
+            breakdown.planning_ms = 0.0
+            breakdown.evaluator_ms = 0.0
+            breakdown.tools_ms = 0.0
+            return GatewayResult(
+                response=clarification_response,
+                route="clarification",
+                latency=breakdown,
+                source=source,
+                execution_path="CLARIFICATION",
+            )
 
         # 1. Tier 1 — Fast Path Check
         if route_decision == RouteType.FAST:
