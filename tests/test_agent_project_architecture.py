@@ -333,6 +333,12 @@ class TestAgentProjectArchitecture(unittest.TestCase):
         # Must return quickly via timeout failsafe
         self.assertLess(elapsed, 0.8, f"Synthesis failsafe took {elapsed:.2f}s, expected < 0.8s")
 
+        # Check telemetry attributes
+        self.assertEqual(getattr(answer, "status", None) or "TIMEOUT", "TIMEOUT")
+        synth_res = collector.synthesize_architecture("analyze my CyberJarvis architecture")
+        self.assertEqual(synth_res.status, "TIMEOUT")
+        self.assertTrue(synth_res.fallback_used)
+
         # Grounded fallback report must be returned with all sections
         self.assertIn("### Architecture Overview", answer)
         self.assertIn("### Request Flow", answer)
@@ -361,12 +367,16 @@ class TestAgentProjectArchitecture(unittest.TestCase):
         self.assertGreaterEqual(res.latency.evidence_extraction_ms, 0.0)
         self.assertGreaterEqual(res.latency.synthesis_ms, 0.0)
         self.assertGreaterEqual(res.latency.total_ms, 0.0)
+        self.assertEqual(res.latency.synthesis_status, "SUCCESS")
+        self.assertFalse(res.latency.fallback_used)
 
         # Check formatted timing report
         report = res.latency.format_timing_report()
         self.assertIn("Repository Scan:", report)
         self.assertIn("Evidence Extraction:", report)
         self.assertIn("LLM Synthesis:", report)
+        self.assertIn("Status: SUCCESS", report)
+        self.assertIn("Fallback: NO", report)
         self.assertIn("Total:", report)
         self.assertIn("Planner: SKIPPED (Deterministic Profile)", report)
 

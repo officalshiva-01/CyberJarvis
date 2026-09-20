@@ -32,4 +32,6 @@ class AgentResponse(BaseModel):
     repo_scan_ms: float = 0.0
     evidence_extraction_ms: float = 0.0
     synthesis_ms: float = 0.0
+    synthesis_status: Optional[str] = None
+    fallback_used: Optional[bool] = None
 

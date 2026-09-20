@@ -77,11 +77,14 @@ class AgentCore:
 
             # 3. LLM Synthesis: bounded Ollama call with timeout failsafe
             self.on_status("🧠 Synthesizing architecture analysis...")
-            clean_answer, spoken_summary, synthesis_ms = self.project_collector.synthesize_architecture(
+            synth_res = self.project_collector.synthesize_architecture(
                 query=user_input_clean,
                 tool_results=tool_results,
                 evidence=evidence,
             )
+            clean_answer, spoken_summary, synthesis_ms = synth_res
+            synthesis_status = getattr(synth_res, "status", "SUCCESS")
+            fallback_used = getattr(synth_res, "fallback_used", False)
             self.on_status("✅ Complete")
 
             response = AgentResponse(
@@ -98,6 +101,8 @@ class AgentCore:
                 repo_scan_ms=round(repo_scan_ms, 2),
                 evidence_extraction_ms=round(evidence_ms, 2),
                 synthesis_ms=round(synthesis_ms, 2),
+                synthesis_status=synthesis_status,
+                fallback_used=fallback_used,
             )
 
             # Persist to conversational state & long-term memory

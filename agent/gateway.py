@@ -49,6 +49,8 @@ class LatencyBreakdown(BaseModel):
     repo_scan_ms: float = 0.0
     evidence_extraction_ms: float = 0.0
     synthesis_ms: float = 0.0
+    synthesis_status: Optional[str] = None
+    fallback_used: Optional[bool] = None
 
     def get_largest_source(self) -> tuple[str, float]:
         """Identify the single largest source of latency."""
@@ -88,6 +90,8 @@ class LatencyBreakdown(BaseModel):
             repo_scan_s = f"{self.repo_scan_ms:.1f}ms" if self.repo_scan_ms > 0 else (f"{self.tools_ms:.1f}ms" if self.tools_ms > 0 else "0.0s")
             evidence_s = f"{self.evidence_extraction_ms:.1f}ms" if self.evidence_extraction_ms > 0 else (f"{self.context_collection_ms:.1f}ms" if self.context_collection_ms > 0 else "0.1ms")
             synthesis_s = f"{self.synthesis_ms / 1000.0:.1f}s" if self.synthesis_ms >= 100 else (f"{self.synthesis_ms:.1f}ms" if self.synthesis_ms > 0 else "0.0s")
+            status_line = f"Status: {self.synthesis_status}\n" if self.synthesis_status else ""
+            fallback_line = f"Fallback: {'YES' if self.fallback_used else 'NO'}\n" if self.fallback_used is not None else ""
             return (
                 f"STT: {stt_s}\n"
                 f"Router: {router_s}\n"
@@ -97,6 +101,8 @@ class LatencyBreakdown(BaseModel):
                 f"Planner: SKIPPED (Deterministic Profile)\n"
                 f"Tools: {tools_s}\n"
                 f"LLM Synthesis: {synthesis_s}\n"
+                f"{status_line}"
+                f"{fallback_line}"
                 f"Evaluator: SKIPPED\n"
                 f"TTS: {tts_s}\n"
                 f"Total: {total_s}\n\n"
@@ -299,6 +305,8 @@ class AgentGateway:
         breakdown.repo_scan_ms = agent_response.repo_scan_ms
         breakdown.evidence_extraction_ms = agent_response.evidence_extraction_ms
         breakdown.synthesis_ms = agent_response.synthesis_ms
+        breakdown.synthesis_status = agent_response.synthesis_status
+        breakdown.fallback_used = agent_response.fallback_used
 
         return GatewayResult(
             response=agent_response,

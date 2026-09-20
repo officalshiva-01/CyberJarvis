@@ -312,6 +312,39 @@ def _call_ollama_with_timeout(model: str, messages: list, options: dict, timeout
     return result_box[0]
 
 
+class SynthesisResult(tuple):
+    """3-tuple representing (answer, spoken_summary, duration_ms) with explicit status and fallback metadata."""
+    answer: str
+    spoken_summary: str
+    duration_ms: float
+    status: str
+    fallback_used: bool
+
+    def __new__(
+        cls,
+        answer: str,
+        spoken_summary: str,
+        duration_ms: float,
+        status: str = "SUCCESS",
+        fallback_used: bool = False,
+    ):
+        return super().__new__(cls, (answer, spoken_summary, duration_ms))
+
+    def __init__(
+        self,
+        answer: str,
+        spoken_summary: str,
+        duration_ms: float,
+        status: str = "SUCCESS",
+        fallback_used: bool = False,
+    ):
+        self.answer = answer
+        self.spoken_summary = spoken_summary
+        self.duration_ms = duration_ms
+        self.status = status
+        self.fallback_used = fallback_used
+
+
 class ProjectContextCollector:
     """Collects structured repository evidence and coordinates bounded architecture synthesis."""
 
@@ -465,16 +498,28 @@ class ProjectContextCollector:
                 clean_answer = self._generate_grounded_architecture_report(evidence)
                 if not spoken_summary:
                     spoken_summary = self._extract_spoken_summary(clean_answer)
+                status = "ERROR"
+                fallback_used = True
+            else:
+                status = "SUCCESS"
+                fallback_used = False
 
-            logger.info(f"PROJECT_ARCHITECTURE synthesis completed in {synthesis_ms:.1f}ms")
-            return clean_answer, spoken_summary, synthesis_ms
+            logger.info(f"PROJECT_ARCHITECTURE synthesis completed in {synthesis_ms:.1f}ms (status={status}, fallback={fallback_used})")
+            return SynthesisResult(clean_answer, spoken_summary, synthesis_ms, status=status, fallback_used=fallback_used)
 
-        except (TimeoutError, Exception) as ex:
+        except TimeoutError as ex:
             synthesis_ms = (time.perf_counter() - synth_start) * 1000
-            logger.warning(f"Ollama architecture synthesis failed or timed out ({ex}). Using deterministic grounded report.")
+            logger.warning(f"Ollama architecture synthesis timed out ({ex}). Using deterministic grounded report.")
             fallback = self._generate_grounded_architecture_report(evidence)
             spoken = self._extract_spoken_summary(fallback)
-            return fallback, spoken, synthesis_ms
+            return SynthesisResult(fallback, spoken, synthesis_ms, status="TIMEOUT", fallback_used=True)
+
+        except Exception as ex:
+            synthesis_ms = (time.perf_counter() - synth_start) * 1000
+            logger.warning(f"Ollama architecture synthesis failed ({ex}). Using deterministic grounded report.")
+            fallback = self._generate_grounded_architecture_report(evidence)
+            spoken = self._extract_spoken_summary(fallback)
+            return SynthesisResult(fallback, spoken, synthesis_ms, status="ERROR", fallback_used=True)
 
     def _extract_spoken_summary(self, text: str) -> str:
         m = re.search(r"(?:SUMMARY|SPOKEN SUMMARY):\s*(.+)$", text, re.IGNORECASE | re.MULTILINE)
