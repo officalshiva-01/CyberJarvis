@@ -52,14 +52,29 @@ class TestAgentPathOptimization(unittest.TestCase):
 
             # Tier 2: Diagnostic
             ("diagnose my computer", RouteType.DIAGNOSTIC),
+            ("diagnosis my computer", RouteType.DIAGNOSTIC),
+            ("diagnosis by computer", RouteType.DIAGNOSTIC),
+            ("diagnose the computer", RouteType.DIAGNOSTIC),
+            ("diagnose my system", RouteType.DIAGNOSTIC),
+            ("check my computer", RouteType.DIAGNOSTIC),
+            ("check my system", RouteType.DIAGNOSTIC),
+            ("computer diagnosis", RouteType.DIAGNOSTIC),
+            ("system diagnosis", RouteType.DIAGNOSTIC),
+            ("why is my computer slow", RouteType.DIAGNOSTIC),
             ("why is my system slow", RouteType.DIAGNOSTIC),
+            ("what is wrong with my computer", RouteType.DIAGNOSTIC),
             ("what is consuming memory", RouteType.DIAGNOSTIC),
+            ("what is consuming the most memory", RouteType.DIAGNOSTIC),
+            ("RAM kaun use kar raha hai", RouteType.DIAGNOSTIC),
+            ("mera computer diagnose karo", RouteType.DIAGNOSTIC),
             ("system health check", RouteType.DIAGNOSTIC),
 
             # Tier 3b: Information (Direct LLM)
             ("how to become a developer", RouteType.INFORMATION),
             ("explain devops", RouteType.INFORMATION),
             ("what is python", RouteType.INFORMATION),
+            ("how does Docker work", RouteType.INFORMATION),
+            ("what is cybersecurity", RouteType.INFORMATION),
             ("how should i learn backend development", RouteType.INFORMATION),
             ("what is github", RouteType.INFORMATION),
             ("explain git repository", RouteType.INFORMATION),
@@ -67,6 +82,9 @@ class TestAgentPathOptimization(unittest.TestCase):
 
             # Tier 3a: Agent
             ("analyze my CyberJarvis architecture", RouteType.AGENT),
+            ("analyse my CyberJarvis architecture", RouteType.AGENT),
+            ("analyze my CyberJarvis project", RouteType.AGENT),
+            ("inspect my CyberJarvis architecture", RouteType.AGENT),
             ("inspect my project structure", RouteType.AGENT),
             ("plan a deployment architecture", RouteType.AGENT),
             ("Analyze my GitHub repository and suggest architectural improvements.", RouteType.AGENT),

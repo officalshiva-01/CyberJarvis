@@ -33,8 +33,8 @@ WAKE_PREFIXES = [
     r"^ok\s+cyber\s+jarvis[\s,:\-]*",
     r"^hello\s+cyberjarvis[\s,:\-]*",
     r"^hello\s+cyber\s+jarvis[\s,:\-]*",
-    r"^cyberjarvis[\s,:\-]*",
-    r"^cyber\s+jarvis[\s,:\-]*",
+    r"^cyberjarvis\b(?!\s+(?:architecture|codebase|project|subsystem)\b)[\s,:\-]*",
+    r"^cyber\s+jarvis\b(?!\s+(?:architecture|codebase|project|subsystem)\b)[\s,:\-]*",
     r"^hey\s+jarvis[\s,:\-]*",
     r"^okay\s+jarvis[\s,:\-]*",
     r"^ok\s+jarvis[\s,:\-]*",
@@ -128,8 +128,32 @@ def normalize_transcript(text: str) -> str:
             cleaned = new_cleaned
             changed = True
 
-    # 3. Speech artifact recovery: "diagnosis my computer" -> "diagnose my computer"
-    cleaned = re.sub(r"\bdiagnosis\s+(my\s+)?(computer|system|pc|laptop)\b", r"diagnose \1\2", cleaned)
+    # 3. Speech artifact recovery:
+    # ASR variants for diagnosis commands:
+    # "diagnosis by computer", "diagnosis my computer", "diagnostic my computer", "diagnosis computer" -> "diagnose my computer"
+    cleaned = re.sub(
+        r"\b(?:diagnosis|diagnostic|diagnostics)\s+(?:by|my|the|of|for|on\s+my|in\s+my)?\s*(computer|system|pc|laptop|machine)\b",
+        r"diagnose my \1",
+        cleaned,
+    )
+    # ASR preposition corruptions: "diagnose by computer" -> "diagnose my computer"
+    cleaned = re.sub(r"\bdiagnose\s+by\s+(computer|system|pc|laptop|machine)\b", r"diagnose my \1", cleaned)
+
+    # Normalize British/American spelling: "analyse" -> "analyze"
+    cleaned = re.sub(r"\banalyse\b", "analyze", cleaned)
+
+    # Conservative speech-artifact normalization for highly probable CyberJarvis variants:
+    # Normalize "cyber jarvis" -> "cyberjarvis"
+    cleaned = re.sub(r"\bcyber\s+jarvis\b", "cyberjarvis", cleaned)
+
+    # "analyse/analyze my cyber service" -> "analyze my cyberjarvis architecture"
+    # Only normalize when the surrounding phrase strongly indicates the CyberJarvis project:
+    cleaned = re.sub(
+        r"\b(analyze|inspect|audit|review|explore|examine)\s+(?:my\s+|our\s+|the\s+)?cyber\s+service(\s+architecture)?\b",
+        r"\1 my cyberjarvis architecture",
+        cleaned,
+    )
+    cleaned = re.sub(r"\bcyber\s+service\s+(architecture|codebase|project|subsystem)\b", r"cyberjarvis \1", cleaned)
 
     # 4. Strip leading and trailing punctuation
     cleaned = re.sub(r"^[\s,:\-.?!'\"]+", "", cleaned)
@@ -264,8 +288,19 @@ class ExecutionRouter:
             "diagnostic log",
         ]
 
-        # If it's a general informational question ("what is github", "explain repository"), don't treat as agent
-        info_starters = ("what is ", "what are ", "explain ", "how to ", "how do i ", "how can i ", "how should i ", "tell me about ", "define ")
+        # Specific CyberJarvis / Project inspection requests
+        # A phrase should only become AGENT when there is evidence that the user wants
+        # CyberJarvis/project inspection or a multi-step task.
+        inspection_verbs = ("analyze", "inspect", "review", "audit", "explore", "examine", "investigate")
+        if any(v in text for v in inspection_verbs):
+            if "cyberjarvis" in text:
+                return True
+            if any(t in text for t in ["project", "codebase", "subsystem", "architecture", "repository", "repo"]):
+                if any(ctx in text for ctx in ["my ", "our ", "this project", "the project", "local"]):
+                    return True
+
+        # If it's a general informational question ("what is github", "explain repository", "what is cybersecurity"), don't treat as agent
+        info_starters = ("what is ", "what are ", "explain ", "how to ", "how do i ", "how can i ", "how should i ", "tell me about ", "define ", "how does ")
         has_local_context = any(w in text for w in ["my ", "our ", "this project", "cyberjarvis", "local", "here", "work tree"])
 
         if any(text.startswith(s) for s in info_starters) and not has_local_context:
@@ -288,6 +323,7 @@ class ExecutionRouter:
         # Common informational query starters
         if any(text.startswith(p) for p in [
             "how to", "how do i", "how can i", "how should i", "how would i",
+            "how does", "how do", "how can", "how would",
             "explain", "what is", "what are", "what does", "define",
             "why is", "why does", "tell me about", "describe",
             "difference between", "comparison between", "compare",
@@ -310,35 +346,71 @@ class ExecutionRouter:
         """Check for known diagnostic or troubleshooting queries."""
         # Guard: If query is specifically about architecture, deployment, codebase, or refactoring,
         # it requires True Agent Path reasoning, UNLESS it is specifically about computer/system health.
-        if any(w in text for w in ["architecture", "deployment", "repository", "codebase", "refactor"]):
+        if any(w in text for w in ["architecture", "deployment", "repository", "codebase", "refactor", "cyberjarvis"]):
             if not any(w in text for w in ["diagnose my computer", "why is my computer slow"]):
                 return False
 
         # 1. Direct diagnostic keywords for system/hardware
-        if any(w in text for w in ["diagnose", "slow", "sluggish", "bottleneck", "troubleshoot"]):
+        system_targets = ["computer", "system", "pc", "laptop", "machine", "hardware"]
+        if any(w in text for w in ["slow", "sluggish", "bottleneck", "troubleshoot"]):
             return True
+
+        if any(w in text for w in ["diagnose", "diagnosis", "diagnostic"]):
+            if any(t in text for t in system_targets) or text.startswith(("diagnose", "run ", "system diagnosis", "computer diagnosis")):
+                return True
 
         # 2. Multi-component diagnostic phrases (English)
         diagnostic_phrases = [
             "diagnose my computer",
-            "diagnose my system",
-            "diagnose my pc",
+            "diagnose the computer",
             "diagnose computer",
+            "diagnose my system",
+            "diagnose the system",
+            "diagnose system",
+            "diagnosis by computer",
+            "diagnosis my computer",
+            "diagnosis the computer",
+            "diagnosis computer",
+            "diagnostic my computer",
+            "diagnostic computer",
+            "run computer diagnosis",
+            "run system diagnosis",
+            "computer diagnosis",
+            "system diagnosis",
             "analyze my computer",
             "analyse my computer",
             "check my computer",
+            "check the computer",
+            "check computer",
             "check my system",
+            "check the system",
+            "check system",
+            "check computer health",
+            "check my computer health",
+            "check system health",
+            "check my system health",
+            "system health check",
+            "computer health check",
+            "system health",
+            "computer health",
             "why is my computer slow",
             "why is my system slow",
             "why is my pc slow",
+            "why is the computer slow",
             "why is the system slow",
             "why is it slow",
             "computer is slow",
             "system is slow",
             "my computer is slow",
-            "check system health",
-            "check my system health",
-            "system health",
+            "what is wrong with my computer",
+            "what is wrong with the computer",
+            "what is wrong with my system",
+            "what is wrong with the system",
+            "what is wrong with my pc",
+            "what is wrong with computer",
+            "whats wrong with my computer",
+            "what's wrong with my computer",
+            "what is wrong with it",
             "check cpu ram disk and network",
             "check cpu, ram, disk and network",
             "check cpu ram disk",
@@ -348,8 +420,6 @@ class ExecutionRouter:
             "what is the main system bottleneck",
             "what is the bottleneck",
             "system bottleneck",
-            "run system diagnosis",
-            "system diagnosis",
             "check system status",
             "system status",
             "check my network",
@@ -378,14 +448,15 @@ class ExecutionRouter:
         if any(p in text for p in hinglish_diagnostic):
             return True
 
-        # 4. Resource consumer inquiries ("what is consuming the most memory", etc.)
+        # 4. Resource consumer inquiries ("what is consuming memory", "who is using my RAM", etc.)
         if any(p in text for p in [
             "what is consuming", "what is using", "what is taking",
+            "who is using", "who is consuming",
             "consuming the most", "using the most", "taking the most",
             "what is taking memory", "taking memory", "using memory", "consuming memory",
             "top processes", "top process", "most memory", "most cpu",
             "which process is consuming", "which process is using",
-            "who is consuming", "heavy process", "offender"
+            "heavy process", "offender"
         ]):
             return True
 

@@ -40,22 +40,28 @@ class InformationPathHandler:
             "You are CyberJarvis, a concise and highly knowledgeable local AI assistant.\n"
             "Directly answer the user's question with accurate, well-structured, practical guidance in Markdown.\n"
             "STRICT RULES:\n"
-            "1. Answer the question directly and factually without introductory filler or conversational preamble.\n"
-            "2. Do NOT mention, recommend, or hallucinate system tools or terminal commands unless specifically asked.\n"
-            "3. Keep the response clear, structured, and focused.\n"
-            "4. Provide a very concise 1-2 sentence spoken summary at the end under 'SUMMARY: <text>'."
+            "1. Answer the question directly and factually without introductory filler, conversational preamble, or addressing the user.\n"
+            "2. Do NOT mention the user's name, personal background, personal goals, or the CyberJarvis project unless the user explicitly asks for personalized advice.\n"
+            "3. Do NOT mention, recommend, or hallucinate system tools or terminal commands unless specifically asked.\n"
+            "4. Keep the response clear, structured, and focused.\n"
+            "5. Provide a very concise 1-2 sentence spoken summary at the end under 'SUMMARY: <text>'."
         )
 
-        # Contextual relevance from memory facts if applicable (e.g. user goal)
-        facts = get_facts(limit=5)
+        # Contextual relevance from memory facts ONLY if the user explicitly asks for personalized advice
+        lower_input = clean_input.lower()
+        explicit_personalized_triggers = [
+            "for me", "my career", "my goal", "my background", "give me advice",
+            "advise me", "based on my", "tailor for me", "personalized",
+            "for my situation", "about me", "my project", "my roadmap",
+        ]
         context_lines = []
-        if facts:
-            lower_input = clean_input.lower()
-            for f in facts:
-                if any(w in lower_input for w in ["developer", "devops", "career", "learn", "goal", "backend", "job"]):
+        if any(trig in lower_input for trig in explicit_personalized_triggers):
+            facts = get_facts(limit=5)
+            if facts:
+                for f in facts:
                     context_lines.append(f"- {f}")
         if context_lines:
-            system_prompt += "\nUser background context:\n" + "\n".join(context_lines)
+            system_prompt += "\nUser background context (use only because user requested personalized advice):\n" + "\n".join(context_lines)
 
         messages = [
             {"role": "system", "content": system_prompt},
