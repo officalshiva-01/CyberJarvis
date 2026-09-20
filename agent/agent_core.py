@@ -5,6 +5,8 @@ from agent.state import ConversationState, Turn
 from agent.planner import Planner
 from agent.executor import PlanExecutor
 from agent.evaluator import Evaluator
+from agent.task_profile import AgentTaskProfile, classify_agent_task_profile
+from agent.project_context import ProjectContextCollector
 from memory import init_db, save_memory, save_fact, get_facts
 from security.policy import SecurityPolicy
 from security.confirmation import ConfirmationHandler
@@ -21,6 +23,7 @@ class AgentCore:
         planner: Optional[Planner] = None,
         executor: Optional[PlanExecutor] = None,
         evaluator: Optional[Evaluator] = None,
+        project_collector: Optional[ProjectContextCollector] = None,
         state: Optional[ConversationState] = None,
         on_status_change: Optional[Callable[[str], None]] = None,
     ):
@@ -28,6 +31,7 @@ class AgentCore:
         self.state = state or ConversationState()
         self.planner = planner or Planner()
         self.evaluator = evaluator or Evaluator()
+        self.project_collector = project_collector or ProjectContextCollector()
         self.on_status = on_status_change or (lambda s: None)
 
         def step_callback(tool_name: str):
@@ -49,19 +53,68 @@ class AgentCore:
         # 1. Check for personal facts to save
         self._detect_and_save_fact(user_input_clean)
 
-        # 2. Planning phase
+        # 2. Agent Task Profile Classification
+        classify_start = time.perf_counter()
+        task_profile = classify_agent_task_profile(user_input_clean)
+        classification_ms = (time.perf_counter() - classify_start) * 1000
+
+        # Special Deterministic Profile: PROJECT_ARCHITECTURE
+        if task_profile == AgentTaskProfile.PROJECT_ARCHITECTURE:
+            logger.info(f"Executing deterministic AGENT profile: {task_profile.value}")
+            self.on_status("📁 Inspecting project architecture...")
+            context_start = time.perf_counter()
+            plan = self.project_collector.build_architecture_task_plan(user_input_clean)
+            context_collection_ms = (time.perf_counter() - context_start) * 1000
+
+            # Execute deterministic inspection tools (list_project_files, read_project_file)
+            tool_results = self.executor.execute_plan(plan)
+
+            # Single bounded Ollama synthesis call (<=500 tokens)
+            self.on_status("🧠 Synthesizing architecture analysis...")
+            clean_answer, spoken_summary, synthesis_ms = self.project_collector.synthesize_architecture(
+                query=user_input_clean,
+                tool_results=tool_results,
+            )
+            self.on_status("✅ Complete")
+
+            response = AgentResponse(
+                answer=clean_answer,
+                spoken_summary=spoken_summary,
+                plan=plan,
+                tool_results=tool_results,
+                completed=True,
+                planning_ms=0.0,
+                evaluator_ms=0.0,
+                project_profile=task_profile.value,
+                classification_ms=round(classification_ms, 2),
+                context_collection_ms=round(context_collection_ms, 2),
+                synthesis_ms=round(synthesis_ms, 2),
+            )
+
+            # Persist to conversational state & long-term memory
+            turn = Turn(
+                user_input=user_input_clean,
+                plan=plan,
+                tool_results=tool_results,
+                assistant_response=response.answer,
+            )
+            self.state.add_turn(turn)
+            save_memory(user_input_clean, response.answer, memory_type="project")
+            return response
+
+        # 3. General Open-Ended Planning Phase
         self.on_status("🧠 Planning...")
         plan_start = time.perf_counter()
         plan = self.planner.plan(user_input_clean, state=self.state)
         planning_ms = (time.perf_counter() - plan_start) * 1000
         logger.info(f"Generated plan in {planning_ms:.1f}ms: intent='{plan.intent}', goal='{plan.goal}', steps={len(plan.steps)}")
 
-        # 3. Execution phase
+        # 4. Execution phase
         tool_results = []
         if plan.steps:
             tool_results = self.executor.execute_plan(plan)
 
-        # 4. Evaluation / Synthesis phase
+        # 5. Evaluation / Synthesis phase
         facts = get_facts(limit=10)
         if not tool_results:
             logger.info("No tools executed. Skipping heavy evaluator synthesis.")
@@ -71,6 +124,8 @@ class AgentCore:
             response.tool_results = []
             response.planning_ms = round(planning_ms, 2)
             response.evaluator_ms = 0.0
+            response.project_profile = task_profile.value
+            response.classification_ms = round(classification_ms, 2)
             self.on_status("✅ Complete")
         else:
             self.on_status("📊 Analyzing...")
@@ -84,9 +139,11 @@ class AgentCore:
             evaluator_ms = (time.perf_counter() - eval_start) * 1000
             response.planning_ms = round(planning_ms, 2)
             response.evaluator_ms = round(evaluator_ms, 2)
+            response.project_profile = task_profile.value
+            response.classification_ms = round(classification_ms, 2)
             self.on_status("✅ Diagnosis ready" if "diagnose" in plan.intent else "✅ Complete")
 
-        # 5. Persist to conversational state & long-term memory
+        # 6. Persist to conversational state & long-term memory
         turn = Turn(
             user_input=user_input_clean,
             plan=plan,

@@ -64,7 +64,11 @@ class TerminalDashboard:
                     )
                 )
             )
-        print(f"Execution Path:\n{exec_path}\n")
+        profile_name = getattr(result, "project_profile", None) or getattr(resp, "project_profile", None)
+        if profile_name:
+            print(f"Execution Path:\n{exec_path}\n\nProject Profile: {profile_name}\n")
+        else:
+            print(f"Execution Path:\n{exec_path}\n")
 
         if exec_path == "FAST":
             route_label = "⚡ FAST PATH (Deterministic)"
@@ -109,6 +113,11 @@ class TerminalDashboard:
         if not r.success:
             return "Failed"
         out = r.output
+        if r.tool_name == "list_project_files" and isinstance(out, list):
+            return f"{len(out)} items"
+        if r.tool_name == "read_project_file" and isinstance(out, dict):
+            fn = out.get("filename", "file")
+            return f"Read {fn}"
         if r.tool_name == "get_cpu_usage":
             return f"{out}% CPU"
         if r.tool_name == "get_memory_usage" and isinstance(out, dict):

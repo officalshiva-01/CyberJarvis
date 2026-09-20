@@ -26,4 +26,8 @@ class AgentResponse(BaseModel):
     planning_ms: float = 0.0
     evaluator_ms: float = 0.0
     diagnostic_report: Optional[Any] = None
+    project_profile: Optional[str] = None
+    classification_ms: float = 0.0
+    context_collection_ms: float = 0.0
+    synthesis_ms: float = 0.0
 
