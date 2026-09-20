@@ -29,7 +29,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from agent.task_profile import AgentTaskProfile, classify_agent_task_profile
-from agent.project_context import ProjectContextCollector
+from agent.project_context import ProjectContextCollector, ArchitectureMapper
 from agent.agent_core import AgentCore
 from agent.gateway import AgentGateway
 from agent.router import ExecutionRouter, RouteType
@@ -247,6 +247,128 @@ class TestAgentProjectArchitecture(unittest.TestCase):
             self.assertIn(comp, answer, f"Missing component in report: {comp}")
 
         self.assertTrue(bool(spoken))
+
+    # ------------------------------------------------------------------
+    # 6. ArchitectureMapper: Component Detection & Boundaries
+    # ------------------------------------------------------------------
+    def test_architecture_mapper_component_detection(self):
+        mapper = ArchitectureMapper()
+        components = mapper.scan_components()
+
+        # Verify all 15 required subsystems are scanned
+        expected_keys = [
+            "entry_point", "gateway", "router", "agent_core",
+            "planner", "executor", "evaluator", "tools",
+            "voice", "memory", "security", "integrations",
+            "observability", "ui", "tests",
+        ]
+        for key in expected_keys:
+            self.assertIn(key, components, f"Missing component key: {key}")
+
+        # Verify existence of key core files
+        self.assertTrue(components["entry_point"]["exists"], "main.py must exist")
+        self.assertTrue(components["gateway"]["exists"], "agent/gateway.py must exist")
+        self.assertTrue(components["router"]["exists"], "agent/router.py must exist")
+        self.assertEqual(
+            components["router"]["tiers"],
+            ["FAST", "DIAGNOSTIC", "INFORMATION", "AGENT"],
+        )
+        self.assertTrue(components["agent_core"]["exists"], "agent/agent_core.py must exist")
+        self.assertTrue(components["tools"]["exists"], "tools/registry.py must exist")
+        self.assertGreaterEqual(components["tests"]["count"], 10, "Should detect automated tests")
+
+    def test_architecture_context_length_stays_bounded(self):
+        mapper = ArchitectureMapper()
+        components = mapper.scan_components()
+        context = mapper.build_structured_context(components)
+
+        # Target: <= 2500 characters
+        self.assertLessEqual(
+            len(context),
+            2500,
+            f"Context length {len(context)} exceeds max allowed 2500 characters",
+        )
+        self.assertIn("CyberJarvis Structured Architecture Facts", context)
+        self.assertIn("main.py", context)
+        self.assertIn("agent/gateway.py", context)
+
+    def test_architecture_mapper_excludes_unrelated_files(self):
+        mapper = ArchitectureMapper()
+
+        # Excluded directories
+        self.assertIsNone(mapper.read_bounded_file(".git/config"))
+        self.assertIsNone(mapper.read_bounded_file("__pycache__/test.cpython-310.pyc"))
+
+        # Excluded file extensions
+        self.assertIsNone(mapper.read_bounded_file("cyberjarvis.db"))
+        self.assertIsNone(mapper.read_bounded_file("recording.wav"))
+        self.assertIsNone(mapper.read_bounded_file("app.log"))
+
+        # Path traversal guard
+        self.assertIsNone(mapper.read_bounded_file("../../etc/passwd"))
+
+        # Valid relevant file
+        readme_content = mapper.read_bounded_file("README.md", max_chars=100)
+        self.assertIsNotNone(readme_content)
+        self.assertLessEqual(len(readme_content), 125)  # 100 + ellipsis
+
+    # ------------------------------------------------------------------
+    # 7. Synthesis Timeout Failsafe & Timing Breakdown
+    # ------------------------------------------------------------------
+    def test_synthesis_timeout_failsafe_triggers_deterministic_fallback(self):
+        import time
+
+        def slow_ollama(*args, **kwargs):
+            time.sleep(1.0)
+            return {"message": {"content": "Slow content"}}
+
+        collector = ProjectContextCollector(timeout_seconds=0.05)
+        start_t = time.perf_counter()
+        with patch("agent.project_context.ollama.chat", side_effect=slow_ollama):
+            answer, spoken, duration_ms = collector.synthesize_architecture(
+                "analyze my CyberJarvis architecture"
+            )
+        elapsed = time.perf_counter() - start_t
+
+        # Must return quickly via timeout failsafe
+        self.assertLess(elapsed, 0.8, f"Synthesis failsafe took {elapsed:.2f}s, expected < 0.8s")
+
+        # Grounded fallback report must be returned with all sections
+        self.assertIn("### Architecture Overview", answer)
+        self.assertIn("### Request Flow", answer)
+        self.assertIn("### Major Components", answer)
+        self.assertIn("### Recommended Next Engineering Step", answer)
+        self.assertTrue(bool(spoken))
+
+    @patch("agent.project_context.ollama.chat")
+    def test_gateway_timing_breakdown_includes_repo_scan_and_evidence(self, mock_chat):
+        mock_chat.return_value = {
+            "message": {
+                "content": (
+                    "### Architecture Overview\nCyberJarvis architecture.\n\n"
+                    "### Request Flow\nGateway routes queries.\n\n"
+                    "### Major Components\nEntry, Gateway, Router, Tools.\n\n"
+                    "### Recommended Next Engineering Step\nExtend task profiles.\n\n"
+                    "SUMMARY: Grounded architecture summary."
+                )
+            }
+        }
+        gw = AgentGateway()
+        res = gw.process_user_request("analyze my CyberJarvis architecture", source="test")
+
+        # Check granular timing metrics in breakdown
+        self.assertGreaterEqual(res.latency.repo_scan_ms, 0.0)
+        self.assertGreaterEqual(res.latency.evidence_extraction_ms, 0.0)
+        self.assertGreaterEqual(res.latency.synthesis_ms, 0.0)
+        self.assertGreaterEqual(res.latency.total_ms, 0.0)
+
+        # Check formatted timing report
+        report = res.latency.format_timing_report()
+        self.assertIn("Repository Scan:", report)
+        self.assertIn("Evidence Extraction:", report)
+        self.assertIn("LLM Synthesis:", report)
+        self.assertIn("Total:", report)
+        self.assertIn("Planner: SKIPPED (Deterministic Profile)", report)
 
 
 if __name__ == "__main__":

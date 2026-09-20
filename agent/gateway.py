@@ -46,6 +46,8 @@ class LatencyBreakdown(BaseModel):
     project_profile: Optional[str] = None
     classification_ms: float = 0.0
     context_collection_ms: float = 0.0
+    repo_scan_ms: float = 0.0
+    evidence_extraction_ms: float = 0.0
     synthesis_ms: float = 0.0
 
     def get_largest_source(self) -> tuple[str, float]:
@@ -61,6 +63,10 @@ class LatencyBreakdown(BaseModel):
             stages.append(("Fast-Path", self.fast_path_ms / 1000.0))
         if self.synthesis_ms > 0:
             stages.append(("LLM Synthesis", self.synthesis_ms / 1000.0))
+        if self.evidence_extraction_ms > 0:
+            stages.append(("Evidence Extraction", self.evidence_extraction_ms / 1000.0))
+        if self.repo_scan_ms > 0:
+            stages.append(("Repository Scan", self.repo_scan_ms / 1000.0))
         if self.analysis_ms > 0 and (self.analysis_ms / 1000.0) > (self.planning_ms / 1000.0):
             stages.append(("Analysis", self.analysis_ms / 1000.0))
         return max(stages, key=lambda s: s[1])
@@ -79,13 +85,15 @@ class LatencyBreakdown(BaseModel):
 
         if self.project_profile:
             classification_s = f"{self.classification_ms:.1f}ms" if self.classification_ms > 0 else "0.1ms"
-            context_s = f"{self.context_collection_ms:.1f}ms" if self.context_collection_ms > 0 else "0.1ms"
+            repo_scan_s = f"{self.repo_scan_ms:.1f}ms" if self.repo_scan_ms > 0 else (f"{self.tools_ms:.1f}ms" if self.tools_ms > 0 else "0.0s")
+            evidence_s = f"{self.evidence_extraction_ms:.1f}ms" if self.evidence_extraction_ms > 0 else (f"{self.context_collection_ms:.1f}ms" if self.context_collection_ms > 0 else "0.1ms")
             synthesis_s = f"{self.synthesis_ms / 1000.0:.1f}s" if self.synthesis_ms >= 100 else (f"{self.synthesis_ms:.1f}ms" if self.synthesis_ms > 0 else "0.0s")
             return (
                 f"STT: {stt_s}\n"
                 f"Router: {router_s}\n"
                 f"Agent Classification: {classification_s}\n"
-                f"Project Context: {context_s}\n"
+                f"Repository Scan: {repo_scan_s}\n"
+                f"Evidence Extraction: {evidence_s}\n"
                 f"Planner: SKIPPED (Deterministic Profile)\n"
                 f"Tools: {tools_s}\n"
                 f"LLM Synthesis: {synthesis_s}\n"
@@ -288,6 +296,8 @@ class AgentGateway:
         breakdown.project_profile = agent_response.project_profile
         breakdown.classification_ms = agent_response.classification_ms
         breakdown.context_collection_ms = agent_response.context_collection_ms
+        breakdown.repo_scan_ms = agent_response.repo_scan_ms
+        breakdown.evidence_extraction_ms = agent_response.evidence_extraction_ms
         breakdown.synthesis_ms = agent_response.synthesis_ms
 
         return GatewayResult(

@@ -62,18 +62,25 @@ class AgentCore:
         if task_profile == AgentTaskProfile.PROJECT_ARCHITECTURE:
             logger.info(f"Executing deterministic AGENT profile: {task_profile.value}")
             self.on_status("📁 Inspecting project architecture...")
-            context_start = time.perf_counter()
+
+            # 1. Repository Scan: plan & execute bounded inspection tools
+            scan_start = time.perf_counter()
             plan = self.project_collector.build_architecture_task_plan(user_input_clean)
-            context_collection_ms = (time.perf_counter() - context_start) * 1000
-
-            # Execute deterministic inspection tools (list_project_files, read_project_file)
             tool_results = self.executor.execute_plan(plan)
+            repo_scan_ms = (time.perf_counter() - scan_start) * 1000
 
-            # Single bounded Ollama synthesis call (<=500 tokens)
+            # 2. Evidence Extraction: structured repository facts extraction
+            self.on_status("🔍 Extracting architecture evidence...")
+            evidence_start = time.perf_counter()
+            evidence = self.project_collector.collect_evidence(tool_results)
+            evidence_ms = (time.perf_counter() - evidence_start) * 1000
+
+            # 3. LLM Synthesis: bounded Ollama call with timeout failsafe
             self.on_status("🧠 Synthesizing architecture analysis...")
             clean_answer, spoken_summary, synthesis_ms = self.project_collector.synthesize_architecture(
                 query=user_input_clean,
                 tool_results=tool_results,
+                evidence=evidence,
             )
             self.on_status("✅ Complete")
 
@@ -87,7 +94,9 @@ class AgentCore:
                 evaluator_ms=0.0,
                 project_profile=task_profile.value,
                 classification_ms=round(classification_ms, 2),
-                context_collection_ms=round(context_collection_ms, 2),
+                context_collection_ms=round(evidence_ms, 2),
+                repo_scan_ms=round(repo_scan_ms, 2),
+                evidence_extraction_ms=round(evidence_ms, 2),
                 synthesis_ms=round(synthesis_ms, 2),
             )
 
