@@ -77,6 +77,10 @@ def convert_stereo_to_mono(stereo_bytes: bytes) -> bytes:
             chosen = [int(x - m1) for x in c1]
         elif (c1_clips > count * 0.75 or rms1 < 5) and (c0_clips < count * 0.75 and rms0 >= 5):
             chosen = [int(x - m0) for x in c0]
+        elif c0_clips < c1_clips * 0.8:
+            chosen = [int(x - m0) for x in c0]
+        elif c1_clips < c0_clips * 0.8:
+            chosen = [int(x - m1) for x in c1]
         else:
             # Average both channels
             chosen = [int(((x0 - m0) + (x1 - m1)) / 2) for x0, x1 in zip(c0, c1)]
@@ -406,6 +410,9 @@ class AudioCapture:
         )
         self.debug = debug or (os.getenv("CYBERJARVIS_DEBUG") == "1")
         self.has_pw_record = shutil.which("pw-record") is not None
+        self.last_capture_init_ms: float = 0.0
+        self.last_calib_ms: float = 0.0
+        self.last_recording_ms: float = 0.0
         self.last_mic_capture_ms: float = 0.0
         self.last_vad_ms: float = 0.0
 
@@ -444,21 +451,26 @@ class AudioCapture:
 
     def record_phrase(
         self,
-        timeout: float = 3.5,
-        phrase_time_limit: float = 6.0,
-        silence_timeout: float = 0.8,
+        timeout: float = 2.5,
+        phrase_time_limit: float = 4.0,
+        silence_timeout: float = 0.5,
     ) -> Tuple[Optional[bytes], str]:
         """
-        Record a phrase from the microphone with adaptive VAD.
-        Detects speech using both RMS and peak energy.
+        Record a phrase from the microphone with optimized adaptive VAD.
+        Promptly detects speech end while preserving short pauses inside speech.
+        Measures granular capture, calibration, recording, and VAD telemetry.
         """
         if not self.is_available():
+            self.last_capture_init_ms = 0.0
+            self.last_calib_ms = 0.0
+            self.last_recording_ms = 0.0
             self.last_mic_capture_ms = 0.0
             self.last_vad_ms = 0.0
             return None, "No microphone input device detected on system."
 
         mic_start_time = time.perf_counter()
         vad_time_acc = 0.0
+        calib_time_acc = 0.0
         chunks: List[bytes] = []
 
         def audio_callback(indata, frames, time_info, status):
@@ -468,6 +480,7 @@ class AudioCapture:
         sr = self.sample_rate
         ch = self.channels
 
+        init_start = time.perf_counter()
         try:
             stream = sd.RawInputStream(
                 samplerate=sr,
@@ -476,6 +489,7 @@ class AudioCapture:
                 device=self.device_index,
                 callback=audio_callback,
             )
+            capture_init_ms = (time.perf_counter() - init_start) * 1000
         except Exception as ex_open:
             # Automatic fallback to device native sample rate or channel configuration
             logger.warning(f"Stream open failed ({ex_open}), attempting parameter fallback.")
@@ -492,11 +506,18 @@ class AudioCapture:
                     )
                     self.sample_rate = sr
                     self.channels = ch
+                    capture_init_ms = (time.perf_counter() - init_start) * 1000
                 except Exception as ex_stream:
                     logger.warning(f"Audio stream open retry failed: {ex_stream}. Falling back to pw-record.")
+                    self.last_capture_init_ms = round((time.perf_counter() - init_start) * 1000, 2)
                     self.last_mic_capture_ms = round((time.perf_counter() - mic_start_time) * 1000, 2)
-                    return self._record_pw_record_fallback(duration=4.0)
+                    return self._record_pw_record_fallback(duration=phrase_time_limit)
+            else:
+                self.last_capture_init_ms = round((time.perf_counter() - init_start) * 1000, 2)
+                self.last_mic_capture_ms = round((time.perf_counter() - mic_start_time) * 1000, 2)
+                return self._record_pw_record_fallback(duration=phrase_time_limit)
 
+        self.last_capture_init_ms = round(capture_init_ms, 2)
         speech_started = False
         speech_detected = False
         start_time = time.time()
@@ -509,12 +530,14 @@ class AudioCapture:
         peak_rms = 0
         calibrated = False
 
-        # Codec startup delay (ALC3246 hardware power-up transient)
-        startup_grace_period = 0.35
+        # Fast stabilized startup grace period (ALC3246 hardware power-up transient)
+        startup_grace_period = 0.15
+        calib_window = 0.10
+        calib_trigger_time = startup_grace_period + calib_window
 
         try:
             with stream:
-                check_interval = 0.08
+                check_interval = 0.05
                 while True:
                     time.sleep(check_interval)
                     elapsed = time.time() - start_time
@@ -522,28 +545,30 @@ class AudioCapture:
                     if not chunks:
                         continue
 
-                    # Calibration after codec has powered up and stabilized
-                    if not calibrated and elapsed >= (startup_grace_period + 0.15):
+                    # Calibration strictly using audio collected after grace period
+                    if not calibrated and elapsed >= calib_trigger_time:
                         vad_calib_start = time.perf_counter()
-                        # Use audio collected after grace period for baseline
-                        raw_calib = b"".join(chunks[int(len(chunks) * 0.5):])
-                        calib_pcm = convert_stereo_to_mono(raw_calib) if ch == 2 else raw_calib
+                        grace_bytes = int(self.sample_rate * startup_grace_period * 2 * ch)
+                        all_so_far = b"".join(chunks)
+                        calib_raw = all_so_far[grace_bytes:] if len(all_so_far) > grace_bytes else all_so_far
+                        calib_pcm = convert_stereo_to_mono(calib_raw) if ch == 2 else calib_raw
                         ambient_rms = calculate_pcm_rms(calib_pcm)
                         ambient_peak = calculate_pcm_peak(calib_pcm)
 
-                        # Dynamic bounded speech threshold
-                        speech_threshold = max(int(ambient_rms * 1.3), int(ambient_rms + 80), 120)
-                        speech_threshold = min(speech_threshold, 1500)
-                        peak_threshold = max(int(ambient_peak * 1.4), int(ambient_peak + 150), 250)
-                        peak_threshold = min(peak_threshold, 3000)
+                        # Dynamic bounded speech threshold strictly above ambient baseline
+                        speech_threshold = max(int(ambient_rms * 1.30), int(ambient_rms + 80), 120)
+                        speech_threshold = min(speech_threshold, 25000)
+                        peak_threshold = max(int(ambient_peak * 1.30), int(ambient_peak + 150), 250)
+                        peak_threshold = min(peak_threshold, 32000)
 
                         calibrated = True
-                        vad_time_acc += (time.perf_counter() - vad_calib_start)
+                        calib_time_acc = (time.perf_counter() - vad_calib_start) * 1000
 
                     # Periodic VAD check
                     if calibrated:
                         vad_calc_start = time.perf_counter()
-                        recent_raw = b"".join(chunks[-3:])
+                        win_bytes = int(self.sample_rate * 0.10 * 2 * ch)
+                        recent_raw = b"".join(chunks)[-win_bytes:]
                         recent_pcm = convert_stereo_to_mono(recent_raw) if ch == 2 else recent_raw
                         current_rms = calculate_pcm_rms(recent_pcm)
                         current_peak = calculate_pcm_peak(recent_pcm)
@@ -551,8 +576,11 @@ class AudioCapture:
                         if current_rms > peak_rms:
                             peak_rms = current_rms
 
-                        # Dual detection: RMS or Peak energy
-                        if current_rms >= speech_threshold or current_peak >= peak_threshold:
+                        # Dual detection: RMS energy or Peak energy with minimal energy confirmation
+                        is_speech = (current_rms >= speech_threshold) or (
+                            current_peak >= peak_threshold and current_rms >= max(int(ambient_rms * 1.05), 80)
+                        )
+                        if is_speech:
                             if not speech_started:
                                 speech_started = True
                                 speech_detected = True
@@ -571,7 +599,7 @@ class AudioCapture:
 
                     # 2. Silence detected after speech began
                     if speech_started and (time.time() - last_speech_time) > silence_timeout:
-                        logger.info("Silence detected after speech; stopping capture.")
+                        logger.info("Silence detected after speech; stopping capture promptly.")
                         break
 
                     # 3. Exceeded max phrase limit
@@ -581,6 +609,9 @@ class AudioCapture:
 
             capture_duration = time.perf_counter() - mic_start_time
             self.last_mic_capture_ms = round(capture_duration * 1000, 2)
+            self.last_calib_ms = round(calib_time_acc, 2)
+            recording_ms = max(0.0, (capture_duration * 1000) - self.last_capture_init_ms - self.last_calib_ms)
+            self.last_recording_ms = round(recording_ms, 2)
             self.last_vad_ms = round(vad_time_acc * 1000, 2)
 
             # Debug output (Phase 3 requirement)
@@ -606,7 +637,7 @@ class AudioCapture:
             else:
                 final_pcm = active_raw
 
-            min_valid_samples = int(self.sample_rate * 0.3)
+            min_valid_samples = int(self.sample_rate * 0.2)
             if not speech_started or len(final_pcm) < (min_valid_samples * 2):
                 return None, "No clear speech captured."
 
@@ -616,7 +647,8 @@ class AudioCapture:
             logger.warning(f"sounddevice stream failed ({ex}). Attempting PipeWire pw-record fallback.")
             self.last_mic_capture_ms = round((time.perf_counter() - mic_start_time) * 1000, 2)
             self.last_vad_ms = round(vad_time_acc * 1000, 2)
-            return self._record_pw_record_fallback(duration=4.0)
+            self.last_recording_ms = self.last_mic_capture_ms
+            return self._record_pw_record_fallback(duration=phrase_time_limit)
 
     def _record_pw_record_fallback(self, duration: float = 4.0) -> Tuple[Optional[bytes], str]:
         """Fallback recording using native PipeWire pw-record CLI."""

@@ -46,7 +46,7 @@ class VoiceAssistantLoop:
             try:
                 listen_start = time.perf_counter()
                 user_command = self.stt.listen_and_transcribe()
-                stt_duration_ms = (time.perf_counter() - listen_start) * 1000
+                stt_duration_ms = getattr(self.stt, "last_total_stt_ms", 0.0) or ((time.perf_counter() - listen_start) * 1000)
 
                 if not user_command:
                     consecutive_failures += 1

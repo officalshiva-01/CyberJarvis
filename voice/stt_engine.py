@@ -4,6 +4,7 @@ Supports Google Cloud/Chromium Speech endpoint with multi-language (en-IN, en-US
 local offline recognition hooks, and robust error recovery.
 """
 import io
+import time
 import wave
 import json
 import shutil
@@ -35,16 +36,21 @@ class GoogleSTTEngine(BaseSTTEngine):
     Supports Hindi, English, and Hinglish accents.
     """
 
-    def __init__(self, languages: Optional[List[str]] = None, timeout: float = 3.5):
+    def __init__(self, languages: Optional[List[str]] = None, timeout: float = 2.5):
         # Default languages in priority order: Indian English (matches English + Hinglish), US English, Hindi
         self.languages = languages or ["en-IN", "en-US", "hi-IN"]
         self.timeout = timeout
         self.flac_bin = shutil.which("flac")
         self._client: Optional[httpx.Client] = None
+        self.last_stt_request_ms: float = 0.0
+        self.last_flac_ms: float = 0.0
 
     def _get_client(self) -> httpx.Client:
         if self._client is None or self._client.is_closed:
-            self._client = httpx.Client(timeout=self.timeout)
+            self._client = httpx.Client(
+                timeout=self.timeout,
+                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10, keepalive_expiry=30.0),
+            )
         return self._client
 
     def _pcm_to_wav(self, pcm_data: bytes, sample_rate: int) -> bytes:
@@ -73,7 +79,9 @@ class GoogleSTTEngine(BaseSTTEngine):
         return None
 
     def transcribe(self, pcm_data: bytes, sample_rate: int = 16000) -> Optional[str]:
-        if not pcm_data:
+        if not pcm_data or len(pcm_data) < int(sample_rate * 2 * 0.2):
+            self.last_stt_request_ms = 0.0
+            self.last_flac_ms = 0.0
             return None
 
         # Cleanly resample to 16000 Hz if hardware captured at another rate
@@ -82,7 +90,9 @@ class GoogleSTTEngine(BaseSTTEngine):
             sample_rate = 16000
 
         wav_bytes = self._pcm_to_wav(pcm_data, sample_rate)
+        flac_start = time.perf_counter()
         flac_bytes = self._encode_to_flac(wav_bytes)
+        self.last_flac_ms = round((time.perf_counter() - flac_start) * 1000, 2)
 
         # Prepare payload and headers
         if flac_bytes:
@@ -98,6 +108,7 @@ class GoogleSTTEngine(BaseSTTEngine):
             "User-Agent": "CyberJarvis-Voice/2.0",
         }
 
+        stt_request_start = time.perf_counter()
         client = self._get_client()
         for lang in self.languages:
             url = f"https://www.google.com/speech-api/v2/recognize?client=chromium&lang={lang}&key={CHROMIUM_KEY}&pFilter=0"
@@ -106,11 +117,13 @@ class GoogleSTTEngine(BaseSTTEngine):
                 if resp.status_code == 200:
                     text = self._parse_google_response(resp.text)
                     if text:
+                        self.last_stt_request_ms = round((time.perf_counter() - stt_request_start) * 1000, 2)
                         logger.info(f"Transcribed audio ({lang}): '{text}'")
                         return text
             except Exception as ex:
                 logger.debug(f"STT request failed for {lang}: {ex}")
 
+        self.last_stt_request_ms = round((time.perf_counter() - stt_request_start) * 1000, 2)
         return None
 
     def _parse_google_response(self, response_text: str) -> Optional[str]:

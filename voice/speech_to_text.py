@@ -22,6 +22,34 @@ class SpeechToText:
         self.last_vad_ms: float = 0.0
         self.last_transcribe_ms: float = 0.0
         self.last_total_stt_ms: float = 0.0
+        self.telemetry: dict = {
+            "capture_init_ms": 0.0,
+            "calibration_ms": 0.0,
+            "recording_ms": 0.0,
+            "vad_silence_ms": 0.0,
+            "resampling_ms": 0.0,
+            "stt_ms": 0.0,
+            "retry_ms": 0.0,
+            "total_stt_ms": 0.0,
+        }
+
+    def get_telemetry(self) -> dict:
+        """Return the most recent STT telemetry breakdown."""
+        return dict(self.telemetry)
+
+    def format_telemetry_report(self) -> str:
+        """Format granular STT telemetry as specified in Phase 2 Step 1."""
+        t = self.telemetry
+        return (
+            f"Capture Init: {t.get('capture_init_ms', 0.0):.1f} ms\n"
+            f"Calibration: {t.get('calibration_ms', 0.0):.1f} ms\n"
+            f"Recording: {t.get('recording_ms', 0.0):.1f} ms\n"
+            f"VAD/Silence: {t.get('vad_silence_ms', 0.0):.1f} ms\n"
+            f"Resampling: {t.get('resampling_ms', 0.0):.1f} ms\n"
+            f"STT: {t.get('stt_ms', 0.0):.1f} ms\n"
+            f"Retry: {t.get('retry_ms', 0.0):.1f} ms\n"
+            f"TOTAL STT: {t.get('total_stt_ms', 0.0):.1f} ms"
+        )
 
     def is_voice_input_available(self) -> bool:
         """Verify that a working microphone is detected on the system."""
@@ -51,13 +79,13 @@ class SpeechToText:
 
     def listen_and_transcribe(
         self,
-        timeout: float = 3.5,
-        phrase_time_limit: float = 6.0,
+        timeout: float = 2.5,
+        phrase_time_limit: float = 4.0,
         max_retries: int = 2,
     ) -> Optional[str]:
         """
         Listen from physical microphone and transcribe speech to text.
-        Retries at most twice upon failure, distinguishing:
+        Retries at most twice upon failure with bounded duration, distinguishing:
         - No speech detected
         - Speech detected but transcription failed
         - Transcription succeeded but result is too short / incomplete
@@ -70,13 +98,33 @@ class SpeechToText:
             except (KeyboardInterrupt, EOFError):
                 return None
 
+        listen_start = time.perf_counter()
+        retry_start_time = None
+        total_retry_ms = 0.0
+        resample_ms = 0.0
+        stt_ms = 0.0
+
         # Retry loop: attempt 0 is initial try, followed by at most max_retries retries
         for attempt in range(max_retries + 1):
+            if attempt > 0 and retry_start_time is None:
+                retry_start_time = time.perf_counter()
+
+            # Bounded retry parameters: user knows to speak immediately on retry
+            if attempt > 0:
+                cur_timeout = min(timeout, 2.0)
+                cur_phrase_limit = min(phrase_time_limit, 3.0)
+                cur_silence_timeout = 0.45
+            else:
+                cur_timeout = timeout
+                cur_phrase_limit = phrase_time_limit
+                cur_silence_timeout = 0.50
+
             try:
                 print("\n🎤 Listening...")
                 pcm_data, status = self.capture.record_phrase(
-                    timeout=timeout,
-                    phrase_time_limit=phrase_time_limit,
+                    timeout=cur_timeout,
+                    phrase_time_limit=cur_phrase_limit,
+                    silence_timeout=cur_silence_timeout,
                 )
 
                 self.last_mic_ms = getattr(self.capture, "last_mic_capture_ms", 0.0)
@@ -95,19 +143,37 @@ class SpeechToText:
                 # Cleanly resample to 16000 Hz if hardware captured at another rate
                 capture_sr = getattr(self.capture, "sample_rate", DEFAULT_SAMPLE_RATE)
                 stt_target_sr = 16000
+                resample_start = time.perf_counter()
                 if capture_sr != stt_target_sr:
                     stt_pcm = resample_pcm16_mono(pcm_data, capture_sr, stt_target_sr)
                     stt_sr = stt_target_sr
                 else:
                     stt_pcm = pcm_data
                     stt_sr = capture_sr
+                resample_ms = (time.perf_counter() - resample_start) * 1000
 
                 print("🎧 Transcribing...")
                 transcribe_start = time.perf_counter()
                 transcript = self.engine.transcribe(stt_pcm, sample_rate=stt_sr)
-                transcribe_ms = (time.perf_counter() - transcribe_start) * 1000
-                self.last_transcribe_ms = round(transcribe_ms, 2)
-                self.last_total_stt_ms = round(self.last_mic_ms + self.last_transcribe_ms, 2)
+                stt_ms = (time.perf_counter() - transcribe_start) * 1000
+                self.last_transcribe_ms = round(stt_ms, 2)
+
+                if retry_start_time is not None:
+                    total_retry_ms = (time.perf_counter() - retry_start_time) * 1000
+
+                total_stt_ms = (time.perf_counter() - listen_start) * 1000
+                self.last_total_stt_ms = round(total_stt_ms, 2)
+
+                self.telemetry = {
+                    "capture_init_ms": round(getattr(self.capture, "last_capture_init_ms", 0.0), 2),
+                    "calibration_ms": round(getattr(self.capture, "last_calib_ms", 0.0), 2),
+                    "recording_ms": round(getattr(self.capture, "last_recording_ms", 0.0), 2),
+                    "vad_silence_ms": round(self.last_vad_ms, 2),
+                    "resampling_ms": round(resample_ms, 2),
+                    "stt_ms": round(stt_ms, 2),
+                    "retry_ms": round(total_retry_ms, 2),
+                    "total_stt_ms": round(total_stt_ms, 2),
+                }
 
                 # Case B: Speech detected but transcription failed
                 if not transcript:
@@ -126,9 +192,11 @@ class SpeechToText:
                         print(f"🔁 Retry {attempt + 1}/{max_retries}")
                         continue
                     else:
+                        print(f"\n⏱️ STT Telemetry:\n{self.format_telemetry_report()}")
                         return transcript
 
                 logger.info(f"Transcribed audio: '{transcript}'")
+                print(f"\n⏱️ STT Telemetry:\n{self.format_telemetry_report()}")
                 return transcript
 
             except Exception as ex:
@@ -138,6 +206,21 @@ class SpeechToText:
                     print(f"🔁 Retry {attempt + 1}/{max_retries}")
                 else:
                     break
+
+        if retry_start_time is not None:
+            total_retry_ms = (time.perf_counter() - retry_start_time) * 1000
+        total_stt_ms = (time.perf_counter() - listen_start) * 1000
+        self.last_total_stt_ms = round(total_stt_ms, 2)
+        self.telemetry = {
+            "capture_init_ms": round(getattr(self.capture, "last_capture_init_ms", 0.0), 2),
+            "calibration_ms": round(getattr(self.capture, "last_calib_ms", 0.0), 2),
+            "recording_ms": round(getattr(self.capture, "last_recording_ms", 0.0), 2),
+            "vad_silence_ms": round(self.last_vad_ms, 2),
+            "resampling_ms": round(resample_ms, 2),
+            "stt_ms": round(stt_ms, 2),
+            "retry_ms": round(total_retry_ms, 2),
+            "total_stt_ms": round(total_stt_ms, 2),
+        }
 
         # Keyboard fallback after failed retries (Section 6)
         try:
