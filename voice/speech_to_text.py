@@ -1,7 +1,7 @@
 import time
 from typing import Optional
 from voice.audio_capture import AudioCapture, AudioDeviceManager, resample_pcm16_mono, DEFAULT_SAMPLE_RATE
-from voice.stt_engine import RobustSTTEngine, BaseSTTEngine
+from voice.stt_engine import RobustSTTEngine, BaseSTTEngine, get_default_stt_engine
 from agent.router import is_incomplete_transcript
 from observability.logging import get_logger
 
@@ -15,14 +15,19 @@ class SpeechToText:
         self,
         audio_capture: Optional[AudioCapture] = None,
         stt_engine: Optional[BaseSTTEngine] = None,
+        backend: Optional[str] = None,
     ):
         self.capture = audio_capture or AudioCapture()
-        self.engine = stt_engine or RobustSTTEngine()
+        self.engine = stt_engine or get_default_stt_engine(backend=backend)
         self.last_mic_ms: float = 0.0
         self.last_vad_ms: float = 0.0
         self.last_transcribe_ms: float = 0.0
         self.last_total_stt_ms: float = 0.0
         self.telemetry: dict = {
+            "backend": getattr(self.engine, "backend_name", "LOCAL"),
+            "model": getattr(self.engine, "model_name", "base"),
+            "load_time_ms": getattr(self.engine, "load_time_ms", 0.0),
+            "inference_time_ms": 0.0,
             "capture_init_ms": 0.0,
             "calibration_ms": 0.0,
             "recording_ms": 0.0,
@@ -38,9 +43,19 @@ class SpeechToText:
         return dict(self.telemetry)
 
     def format_telemetry_report(self) -> str:
-        """Format granular STT telemetry as specified in Phase 2 Step 1."""
+        """Format granular STT telemetry as specified in Phase 2 & Phase 3."""
         t = self.telemetry
+        backend = str(t.get("backend", getattr(self.engine, "backend_name", "LOCAL"))).upper()
+        model = str(t.get("model", getattr(self.engine, "model_name", "base")))
+        load_time = float(t.get("load_time_ms", getattr(self.engine, "load_time_ms", 0.0)))
+        infer_time = float(t.get("inference_time_ms", t.get("stt_ms", getattr(self.engine, "last_inference_ms", 0.0))))
+        total_stt = float(t.get("total_stt_ms", 0.0))
+
         return (
+            f"STT Backend: {backend}\n"
+            f"Model: {model}\n"
+            f"Load Time: {load_time:.1f} ms\n"
+            f"Inference Time: {infer_time:.1f} ms\n"
             f"Capture Init: {t.get('capture_init_ms', 0.0):.1f} ms\n"
             f"Calibration: {t.get('calibration_ms', 0.0):.1f} ms\n"
             f"Recording: {t.get('recording_ms', 0.0):.1f} ms\n"
@@ -48,7 +63,8 @@ class SpeechToText:
             f"Resampling: {t.get('resampling_ms', 0.0):.1f} ms\n"
             f"STT: {t.get('stt_ms', 0.0):.1f} ms\n"
             f"Retry: {t.get('retry_ms', 0.0):.1f} ms\n"
-            f"TOTAL STT: {t.get('total_stt_ms', 0.0):.1f} ms"
+            f"Total STT: {total_stt:.1f} ms\n"
+            f"TOTAL STT: {total_stt:.1f} ms"
         )
 
     def is_voice_input_available(self) -> bool:
@@ -76,6 +92,29 @@ class SpeechToText:
                 "samplerate": sr,
             }
         return None
+
+    def get_stt_backend_info(self) -> str:
+        """Return human-readable description of active STT backend and model."""
+        backend = getattr(self.engine, "backend_name", "LOCAL")
+        model = getattr(self.engine, "model_name", "base")
+        return f"{backend} ({model})"
+
+    def _sync_telemetry(self, resample_ms: float, stt_ms: float, total_retry_ms: float, total_stt_ms: float):
+        infer_ms = getattr(self.engine, "last_inference_ms", round(stt_ms, 2))
+        self.telemetry = {
+            "backend": getattr(self.engine, "backend_name", "LOCAL"),
+            "model": getattr(self.engine, "model_name", "base"),
+            "load_time_ms": getattr(self.engine, "load_time_ms", 0.0),
+            "inference_time_ms": infer_ms,
+            "capture_init_ms": round(getattr(self.capture, "last_capture_init_ms", 0.0), 2),
+            "calibration_ms": round(getattr(self.capture, "last_calib_ms", 0.0), 2),
+            "recording_ms": round(getattr(self.capture, "last_recording_ms", 0.0), 2),
+            "vad_silence_ms": round(self.last_vad_ms, 2),
+            "resampling_ms": round(resample_ms, 2),
+            "stt_ms": round(stt_ms, 2),
+            "retry_ms": round(total_retry_ms, 2),
+            "total_stt_ms": round(total_stt_ms, 2),
+        }
 
     def listen_and_transcribe(
         self,
@@ -164,16 +203,7 @@ class SpeechToText:
                 total_stt_ms = (time.perf_counter() - listen_start) * 1000
                 self.last_total_stt_ms = round(total_stt_ms, 2)
 
-                self.telemetry = {
-                    "capture_init_ms": round(getattr(self.capture, "last_capture_init_ms", 0.0), 2),
-                    "calibration_ms": round(getattr(self.capture, "last_calib_ms", 0.0), 2),
-                    "recording_ms": round(getattr(self.capture, "last_recording_ms", 0.0), 2),
-                    "vad_silence_ms": round(self.last_vad_ms, 2),
-                    "resampling_ms": round(resample_ms, 2),
-                    "stt_ms": round(stt_ms, 2),
-                    "retry_ms": round(total_retry_ms, 2),
-                    "total_stt_ms": round(total_stt_ms, 2),
-                }
+                self._sync_telemetry(resample_ms, stt_ms, total_retry_ms, total_stt_ms)
 
                 # Case B: Speech detected but transcription failed
                 if not transcript:
@@ -211,18 +241,9 @@ class SpeechToText:
             total_retry_ms = (time.perf_counter() - retry_start_time) * 1000
         total_stt_ms = (time.perf_counter() - listen_start) * 1000
         self.last_total_stt_ms = round(total_stt_ms, 2)
-        self.telemetry = {
-            "capture_init_ms": round(getattr(self.capture, "last_capture_init_ms", 0.0), 2),
-            "calibration_ms": round(getattr(self.capture, "last_calib_ms", 0.0), 2),
-            "recording_ms": round(getattr(self.capture, "last_recording_ms", 0.0), 2),
-            "vad_silence_ms": round(self.last_vad_ms, 2),
-            "resampling_ms": round(resample_ms, 2),
-            "stt_ms": round(stt_ms, 2),
-            "retry_ms": round(total_retry_ms, 2),
-            "total_stt_ms": round(total_stt_ms, 2),
-        }
+        self._sync_telemetry(resample_ms, stt_ms, total_retry_ms, total_stt_ms)
 
-        # Keyboard fallback after failed retries (Section 6)
+        # Keyboard fallback after failed retries
         try:
             fallback_text = input("\n⌨️ Voice unavailable. Enter command: ").strip()
             return fallback_text if fallback_text else None

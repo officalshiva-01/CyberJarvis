@@ -21,6 +21,10 @@ REQUIRE_CONFIRMATION_FOR_MUTATING = True
 # Voice Engine Settings
 TTS_ENGINE = os.getenv("CYBERJARVIS_TTS", "spd-say")  # Options: spd-say, pyttsx3, none
 STT_ENGINE = os.getenv("CYBERJARVIS_STT", "speech_recognition") # Options: speech_recognition, text
+STT_BACKEND = os.getenv("CYBERJARVIS_STT_BACKEND", os.getenv("STT_BACKEND", "local")).lower()  # Options: local, network
+STT_MODEL = os.getenv("CYBERJARVIS_STT_MODEL", os.getenv("STT_MODEL", "base"))  # Options: tiny, base, small, medium
+STT_LANGUAGE = os.getenv("CYBERJARVIS_STT_LANGUAGE", os.getenv("STT_LANGUAGE", "en"))
+STT_NETWORK_FALLBACK = os.getenv("CYBERJARVIS_STT_NETWORK_FALLBACK", "false").lower() in ("true", "1", "yes")
 AUDIO_DEVICE = os.getenv("CYBERJARVIS_AUDIO_DEVICE", None)
 if AUDIO_DEVICE is not None:
     try:

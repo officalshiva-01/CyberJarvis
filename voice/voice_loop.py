@@ -29,11 +29,13 @@ class VoiceAssistantLoop:
     def run(self):
         mic_info = self.stt.get_microphone_info()
         audio_details = self.stt.get_audio_device_details()
+        stt_info = self.stt.get_stt_backend_info()
         TerminalDashboard.print_banner(
             mode="VOICE INTERACTIVE",
             model=self.model,
             mic_info=mic_info,
             audio_details=audio_details,
+            stt_info=stt_info,
         )
 
         welcome_phrase = "CyberJarvis is online and ready for voice commands."

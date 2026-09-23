@@ -17,6 +17,7 @@ class TerminalDashboard:
         model: str = DEFAULT_MODEL,
         mic_info: Optional[str] = None,
         audio_details: Optional[Dict[str, Any]] = None,
+        stt_info: Optional[str] = None,
     ):
         print("\n" + "=" * 62)
         print("                   🤖 CYBERJARVIS")
@@ -24,6 +25,8 @@ class TerminalDashboard:
         print("=" * 62)
         print(f"  🎤 MODE    : {mode}")
         print(f"  🧠 MODEL   : Ollama / {model}")
+        if stt_info:
+            print(f"  🎧 STT     : {stt_info}")
         print(f"  🟢 STATUS  : ONLINE & READY")
         if audio_details and isinstance(audio_details, dict):
             sr_val = audio_details.get("samplerate", 44100)
