@@ -270,6 +270,13 @@ class ExecutionRouter:
 
     def _is_agent_query(self, text: str, tokens: Set[str]) -> bool:
         """Check for genuine agentic tasks requiring local tools, planning, and evaluation."""
+        # External Live API actions (Weather & GitHub tools)
+        if any(w in text for w in ["weather", "forecast"]) and not any(text == w or text.startswith(w + " ") for w in ["what is weather forecasting", "define weather", "explain weather"]):
+            return True
+
+        if "github" in text and not any(text == w or text.startswith(w + " ") for w in ["what is github", "explain github", "define github"]):
+            return True
+
         # Queries explicitly targeting local project, codebase, or multi-step execution
         agent_phrases = [
             "architectur",

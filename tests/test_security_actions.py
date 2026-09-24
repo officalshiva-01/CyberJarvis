@@ -152,6 +152,49 @@ class TestSecurityActionsAndPermissions(unittest.TestCase):
         except Exception:
             pass
 
+    def test_repeated_backups_exclude_backups_directory(self):
+        """Regression test: repeated backups must explicitly exclude backups/ and not archive older backups."""
+        import tarfile
+        approve_handler = ConfirmationHandler(voice_prompt_fn=lambda p: True)
+
+        res1 = registry.execute(
+            tool_name="create_project_backup",
+            parameters={"backup_name": "reg_first"},
+            confirmation_handler=approve_handler,
+        )
+        self.assertTrue(res1.success)
+        path1 = Path(res1.output["backup_path"])
+        self.assertTrue(path1.is_file())
+
+        try:
+            res2 = registry.execute(
+                tool_name="create_project_backup",
+                parameters={"backup_name": "reg_second"},
+                confirmation_handler=approve_handler,
+            )
+            self.assertTrue(res2.success)
+            path2 = Path(res2.output["backup_path"])
+            self.assertTrue(path2.is_file())
+
+            # Read members from the second backup
+            with tarfile.open(path2, "r:gz") as tar:
+                member_names = tar.getnames()
+
+            # Ensure neither the first backup file nor any backups/ member is present
+            self.assertNotIn(path1.name, member_names)
+            for m in member_names:
+                parts = Path(m).parts
+                self.assertNotIn("backups", parts, f"Member '{m}' should not be in backups/")
+                self.assertFalse(m.endswith(".tar.gz"), f"Nested archive '{m}' found in backup!")
+
+        finally:
+            try:
+                path1.unlink(missing_ok=True)
+                if 'path2' in locals():
+                    path2.unlink(missing_ok=True)
+            except Exception:
+                pass
+
     # -------------------------------------------------------------
     # 4. BLOCKED HIGH-RISK / CRITICAL OPERATIONS
     # -------------------------------------------------------------

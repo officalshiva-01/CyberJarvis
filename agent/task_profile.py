@@ -17,6 +17,9 @@ class AgentTaskProfile(str, Enum):
     DEPLOYMENT_PLANNING = "DEPLOYMENT_PLANNING"
     PROJECT_TESTING = "PROJECT_TESTING"
     PROJECT_BACKUP = "PROJECT_BACKUP"
+    GITHUB_STATUS = "GITHUB_STATUS"
+    GITHUB_COMMITS = "GITHUB_COMMITS"
+    WEATHER_INSPECTION = "WEATHER_INSPECTION"
     GENERAL_PLANNING = "GENERAL_PLANNING"
 
 
@@ -31,7 +34,22 @@ def classify_agent_task_profile(query: str) -> AgentTaskProfile:
 
     q = query.lower().strip()
 
-    # 0a. PROJECT_TESTING (Secure action: run tests)
+    # 0a. WEATHER_INSPECTION (Secure external API action)
+    if "weather" in q and not any(q == w or q.startswith(w + " ") for w in ["what is weather forecasting", "define weather", "explain weather"]):
+        logger.info(f"Agent Task Profile: WEATHER_INSPECTION for query: '{query}'")
+        return AgentTaskProfile.WEATHER_INSPECTION
+
+    # 0b. GITHUB_COMMITS (Secure external API action)
+    if "github" in q and any(w in q for w in ["commit", "commits"]):
+        logger.info(f"Agent Task Profile: GITHUB_COMMITS for query: '{query}'")
+        return AgentTaskProfile.GITHUB_COMMITS
+
+    # 0c. GITHUB_STATUS (Secure external API action)
+    if "github" in q and any(w in q for w in ["repo", "repository", "status", "check", "review", "show", "inspect", "info", "project"]):
+        logger.info(f"Agent Task Profile: GITHUB_STATUS for query: '{query}'")
+        return AgentTaskProfile.GITHUB_STATUS
+
+    # 0d. PROJECT_TESTING (Secure action: run tests)
     if any(p in q for p in [
         "run my tests", "run tests", "run the tests", "run project tests",
         "execute tests", "execute my tests", "run pytest", "test my project",
@@ -40,7 +58,7 @@ def classify_agent_task_profile(query: str) -> AgentTaskProfile:
         logger.info(f"Agent Task Profile: PROJECT_TESTING for query: '{query}'")
         return AgentTaskProfile.PROJECT_TESTING
 
-    # 0b. PROJECT_BACKUP (Secure action: create project backup)
+    # 0e. PROJECT_BACKUP (Secure action: create project backup)
     if any(p in q for p in [
         "create a backup", "create backup", "backup my project", "backup the project",
         "make a backup", "take a backup", "backup project", "project backup"

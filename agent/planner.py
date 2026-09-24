@@ -120,6 +120,13 @@ def is_tool_relevant_to_request(tool_name: str, query: str) -> bool:
     if tool_name in ("open_terminal", "open_browser", "launch_application"):
         return any(w in q for w in ["open", "launch", "start", "run application", "browser", "terminal"])
 
+    # 9. External API tools (GitHub & Weather)
+    if tool_name in ("get_repository", "get_repository_status", "get_recent_commits", "get_github_repo_info", "get_github_recent_commits"):
+        return any(w in q for w in ["github", "gh", "remote repo", "remote repository"])
+
+    if tool_name == "get_current_weather":
+        return any(w in q for w in ["weather", "temperature", "forecast", "climate"])
+
     return True
 
 

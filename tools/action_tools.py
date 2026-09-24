@@ -62,7 +62,7 @@ def create_project_backup(backup_name: str = "") -> dict:
     from pathlib import Path
     from config import PROJECT_ROOT
 
-    backups_dir = PROJECT_ROOT / "backups"
+    backups_dir = (PROJECT_ROOT / "backups").resolve()
     backups_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -71,20 +71,37 @@ def create_project_backup(backup_name: str = "") -> dict:
     archive_path = backups_dir / archive_name
 
     # Excluded directories to prevent bloat and recursion
-    excluded_names = {".venv", "venv", "__pycache__", ".git", "backups", ".pytest_cache", ".ruff_cache"}
+    excluded_names = {
+        ".venv", "venv", "__pycache__", ".git", "backups", "backup",
+        ".pytest_cache", ".ruff_cache", "logs", "scratch"
+    }
+
+    def is_backup_related(p_str: str) -> bool:
+        p = Path(p_str)
+        for part in p.parts:
+            if part.lower() in ("backups", "backup"):
+                return True
+        if p.name.endswith((".tar.gz", ".tgz", ".tar", ".zip", ".backup")):
+            return True
+        return False
 
     def tar_filter(tarinfo):
+        if is_backup_related(tarinfo.name):
+            return None
         parts = Path(tarinfo.name).parts
         if any(p in excluded_names for p in parts):
             return None
-        if tarinfo.name.endswith(".pyc"):
+        if tarinfo.name.endswith((".pyc", ".pyo")):
             return None
         return tarinfo
 
     try:
         with tarfile.open(archive_path, "w:gz") as tar:
             for item in sorted(PROJECT_ROOT.iterdir()):
-                if item.name in excluded_names:
+                resolved = item.resolve()
+                if resolved == backups_dir or backups_dir in resolved.parents:
+                    continue
+                if item.name in excluded_names or is_backup_related(item.name):
                     continue
                 tar.add(str(item), arcname=item.name, filter=tar_filter)
 
@@ -112,6 +129,14 @@ def create_project_backup(backup_name: str = "") -> dict:
                     "success": False,
                     "verified": False,
                     "error": "Verification failed: backup archive contains no members.",
+                }
+            # Verify no nested backup files or backups/ directory members were archived
+            nested_backups = [m.name for m in members if is_backup_related(m.name)]
+            if nested_backups:
+                return {
+                    "success": False,
+                    "verified": False,
+                    "error": f"Verification failed: backup archive contains nested backup files: {nested_backups[:5]}",
                 }
 
         size_mb = round(size_bytes / (1024 * 1024), 2)

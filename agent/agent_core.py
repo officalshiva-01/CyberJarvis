@@ -35,7 +35,7 @@ class AgentCore:
         self.on_status = on_status_change or (lambda s: None)
 
         def step_callback(tool_name: str):
-            self.on_status(f"🔧 Running: {tool_name}")
+            self.on_status(f"🔧 {tool_name}")
 
         self.executor = executor or PlanExecutor(
             policy=SecurityPolicy(),
@@ -178,6 +178,188 @@ class AgentCore:
             turn = Turn(user_input=user_input_clean, plan=plan, tool_results=tool_results, assistant_response=response.answer)
             self.state.add_turn(turn)
             save_memory(user_input_clean, response.answer, memory_type="project")
+            return response
+
+        # Specialized API Actions: GITHUB_STATUS
+        if task_profile == AgentTaskProfile.GITHUB_STATUS:
+            self.on_status("🐙 Inspecting GitHub repository...")
+            owner, repo = self._parse_github_target(user_input_clean)
+            plan = AgentPlan(
+                intent="github_status",
+                goal=user_input_clean,
+                steps=[PlanStep(tool="get_repository_status", parameters={"owner": owner, "repo": repo}, explanation="Fetch remote repository status")],
+            )
+            tool_results = self.executor.execute_plan(plan)
+            res = tool_results[0] if tool_results else None
+            success = res.success if res else False
+            output = res.output if (res and isinstance(res.output, dict)) else {}
+
+            if output.get("offline"):
+                answer = f"🌐 **GitHub Integration (Offline)**: Unable to connect to GitHub.\n- Host: `api.github.com`\n- Error: {output.get('error')}\n- Status: Network unreachable or offline."
+                spoken_summary = "Unable to connect to GitHub. The network appears to be offline."
+            elif output.get("rate_limited"):
+                answer = f"⚠️ **GitHub API (Rate Limited)**: Request was blocked due to GitHub rate limits.\n- Details: {output.get('error')}\n- Tip: Configure GITHUB_TOKEN in your environment for higher rate limits."
+                spoken_summary = "GitHub API rate limit exceeded."
+            elif not success or output.get("error"):
+                err_msg = output.get("error") or (res.error if res else "Unknown GitHub error")
+                note = ""
+                if "404" in str(err_msg):
+                    note = f"\n\n*Note: If `{owner}/{repo}` is a private repository, ensure `GITHUB_TOKEN` is set in your environment.*"
+                answer = f"🐙 **GitHub Status for `{owner}/{repo}`**\n- **Status**: ❌ Error\n- **Details**: {err_msg}{note}"
+                spoken_summary = f"GitHub repository check for {repo} returned an error."
+            else:
+                desc = output.get("description", "No description provided.")
+                branch = output.get("default_branch", "main")
+                stars = output.get("stars", 0)
+                forks = output.get("forks", 0)
+                open_issues = output.get("open_issues", 0)
+                html_url = output.get("html_url", "")
+                commit = output.get("latest_commit", {})
+                commit_info = f"`{commit.get('sha', '')}` {commit.get('message', '')}" if commit else "None"
+
+                answer = (
+                    f"🐙 **GitHub Repository: [{owner}/{repo}]({html_url})**\n\n"
+                    f"- **Description**: {desc}\n"
+                    f"- **Default Branch**: `{branch}`\n"
+                    f"- **Stars**: {stars} ⭐ | **Forks**: {forks} 🍴\n"
+                    f"- **Open Issues**: {open_issues}\n"
+                    f"- **Latest Commit**: {commit_info}\n"
+                    f"- **Status**: **VERIFIED** (Active)"
+                )
+                spoken_summary = f"GitHub repository {repo} has {stars} stars, {open_issues} open issues, and default branch {branch}."
+
+            self.on_status("✅ Complete")
+            response = AgentResponse(
+                answer=answer,
+                spoken_summary=spoken_summary,
+                plan=plan,
+                tool_results=tool_results,
+                completed=True,
+                planning_ms=0.0,
+                evaluator_ms=0.0,
+                project_profile=task_profile.value,
+                classification_ms=round(classification_ms, 2),
+            )
+            turn = Turn(user_input=user_input_clean, plan=plan, tool_results=tool_results, assistant_response=response.answer)
+            self.state.add_turn(turn)
+            save_memory(user_input_clean, response.answer, memory_type="project")
+            return response
+
+        # Specialized API Actions: GITHUB_COMMITS
+        if task_profile == AgentTaskProfile.GITHUB_COMMITS:
+            self.on_status("🐙 Fetching recent GitHub commits...")
+            owner, repo = self._parse_github_target(user_input_clean)
+            plan = AgentPlan(
+                intent="github_commits",
+                goal=user_input_clean,
+                steps=[PlanStep(tool="get_recent_commits", parameters={"owner": owner, "repo": repo, "limit": 5}, explanation="Fetch remote git commits")],
+            )
+            tool_results = self.executor.execute_plan(plan)
+            res = tool_results[0] if tool_results else None
+            success = res.success if res else False
+            output = res.output if res else []
+
+            is_err_dict = isinstance(output, dict) and output.get("error")
+            is_err_list = isinstance(output, list) and output and isinstance(output[0], dict) and output[0].get("error")
+
+            if (isinstance(output, dict) and output.get("offline")) or (is_err_list and output[0].get("offline")):
+                err_text = output.get("error") if isinstance(output, dict) else output[0].get("error")
+                answer = f"🌐 **GitHub Integration (Offline)**: Unable to fetch commits.\n- Details: {err_text}\n- Status: Network unreachable."
+                spoken_summary = "Unable to fetch GitHub commits because the network is offline."
+            elif (isinstance(output, dict) and output.get("rate_limited")) or (is_err_list and output[0].get("rate_limited")):
+                answer = "⚠️ **GitHub API (Rate Limited)**: GitHub rate limit reached. Please wait or set GITHUB_TOKEN."
+                spoken_summary = "GitHub API rate limit exceeded."
+            elif not success or is_err_dict or is_err_list:
+                err_text = output.get("error") if isinstance(output, dict) else (output[0].get("error") if is_err_list else (res.error if res else "Unknown error"))
+                answer = f"🐙 **GitHub Commits for `{owner}/{repo}`**\n- **Status**: ❌ Error\n- **Details**: {err_text}"
+                spoken_summary = f"Failed to retrieve GitHub commits for {repo}."
+            else:
+                commits = output if isinstance(output, list) else []
+                lines = [f"🐙 **Recent GitHub Commits for `{owner}/{repo}`**\n"]
+                for c in commits:
+                    sha = c.get("sha", "")
+                    msg = c.get("message", "")
+                    author = c.get("author", "Unknown")
+                    date = c.get("date", "")[:10]
+                    lines.append(f"- `{sha}` **{msg}** *(by {author} on {date})*")
+                answer = "\n".join(lines)
+                latest_msg = commits[0].get("message", "") if commits else "None"
+                spoken_summary = f"Retrieved {len(commits)} recent GitHub commits for {repo}. Latest is: {latest_msg}."
+
+            self.on_status("✅ Complete")
+            response = AgentResponse(
+                answer=answer,
+                spoken_summary=spoken_summary,
+                plan=plan,
+                tool_results=tool_results,
+                completed=True,
+                planning_ms=0.0,
+                evaluator_ms=0.0,
+                project_profile=task_profile.value,
+                classification_ms=round(classification_ms, 2),
+            )
+            turn = Turn(user_input=user_input_clean, plan=plan, tool_results=tool_results, assistant_response=response.answer)
+            self.state.add_turn(turn)
+            save_memory(user_input_clean, response.answer, memory_type="project")
+            return response
+
+        # Specialized API Actions: WEATHER_INSPECTION
+        if task_profile == AgentTaskProfile.WEATHER_INSPECTION:
+            self.on_status("⛅ Checking weather conditions...")
+            location = self._parse_weather_location(user_input_clean)
+            plan = AgentPlan(
+                intent="weather_inspection",
+                goal=user_input_clean,
+                steps=[PlanStep(tool="get_current_weather", parameters={"location": location}, explanation="Fetch current weather conditions")],
+            )
+            tool_results = self.executor.execute_plan(plan)
+            res = tool_results[0] if tool_results else None
+            success = res.success if res else False
+            output = res.output if (res and isinstance(res.output, dict)) else {}
+
+            if output.get("offline"):
+                answer = f"🌐 **Weather Service (Offline)**: Unable to retrieve weather data.\n- Details: {output.get('error')}\n- Status: Network unreachable or offline."
+                spoken_summary = "Weather service is currently unreachable because the network is offline."
+            elif output.get("rate_limited"):
+                answer = "⚠️ **Weather Service (Rate Limited)**: Too many requests sent to weather service. Please wait."
+                spoken_summary = "Weather service rate limit exceeded."
+            elif not success or output.get("error"):
+                err_msg = output.get("error") or (res.error if res else "Unknown weather service error")
+                answer = f"⛅ **Weather Error**: {err_msg}"
+                spoken_summary = "Failed to retrieve current weather information."
+            else:
+                loc_name = output.get("location") or location or "Current Location"
+                desc = output.get("weather_desc", "Clear")
+                temp = output.get("temperature_c", "N/A")
+                feels = output.get("feels_like_c", temp)
+                humidity = output.get("humidity", "N/A")
+                wind = output.get("wind_kmph", "N/A")
+
+                answer = (
+                    f"⛅ **Weather for {loc_name}**\n\n"
+                    f"- **Condition**: {desc}\n"
+                    f"- **Temperature**: **{temp}°C** (Feels like {feels}°C)\n"
+                    f"- **Humidity**: {humidity}%\n"
+                    f"- **Wind Speed**: {wind} km/h\n"
+                    f"- **Status**: **VERIFIED**"
+                )
+                spoken_summary = f"The weather in {loc_name} is currently {desc} at {temp} degrees Celsius."
+
+            self.on_status("✅ Complete")
+            response = AgentResponse(
+                answer=answer,
+                spoken_summary=spoken_summary,
+                plan=plan,
+                tool_results=tool_results,
+                completed=True,
+                planning_ms=0.0,
+                evaluator_ms=0.0,
+                project_profile=task_profile.value,
+                classification_ms=round(classification_ms, 2),
+            )
+            turn = Turn(user_input=user_input_clean, plan=plan, tool_results=tool_results, assistant_response=response.answer)
+            self.state.add_turn(turn)
+            save_memory(user_input_clean, response.answer, memory_type="general")
             return response
 
         # Deterministic Profiles: PROJECT_ARCHITECTURE, PROJECT_INSPECTION, PROJECT_DEBUGGING, DEPLOYMENT_PLANNING
@@ -328,3 +510,19 @@ class AgentCore:
         if any(lower.startswith(p) for p in ["i prefer", "i like", "i don't like", "i dislike"]):
             return "preference"
         return "conversation"
+
+    def _parse_github_target(self, text: str) -> tuple[str, str]:
+        import re
+        from integrations.github_api import DEFAULT_OWNER, DEFAULT_REPO
+        match = re.search(r"\b([a-zA-Z0-9_\-\.]+)/([a-zA-Z0-9_\-\.]+)\b", text)
+        if match:
+            return match.group(1), match.group(2)
+        return DEFAULT_OWNER, DEFAULT_REPO
+
+    def _parse_weather_location(self, text: str) -> str:
+        import re
+        match = re.search(r"\b(?:in|for|at)\s+([a-zA-Z\s]+?)(?:\s+(?:today|now|tomorrow|currently))?$", text, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+        return ""
+
