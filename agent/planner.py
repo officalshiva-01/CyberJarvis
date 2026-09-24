@@ -88,7 +88,7 @@ def is_tool_relevant_to_request(tool_name: str, query: str) -> bool:
         return any(w in q for w in ["network", "internet", "ping", "wifi", "connect", "dns", "ip address", "online", "offline", "adapter"])
 
     # 4. Diagnostics & Resource tools
-    if tool_name in ("get_cpu_usage", "get_memory_usage", "get_disk_usage", "get_top_processes", "diagnose_system_bottleneck", "explain_bottleneck_causes"):
+    if tool_name in ("get_cpu_usage", "get_memory_usage", "get_disk_usage", "get_top_processes", "diagnose_system_bottleneck", "explain_bottleneck_causes", "get_system_health"):
         return any(w in q for w in [
             "cpu", "processor", "ram", "memory", "disk", "storage", "space", "process", "processes",
             "slow", "sluggish", "freeze", "lag", "hang", "bottleneck", "performance", "diagnos",
@@ -96,18 +96,27 @@ def is_tool_relevant_to_request(tool_name: str, query: str) -> bool:
         ])
 
     # 5. Git tools
-    if tool_name in ("get_git_status", "get_git_recent_commits", "git_status", "git_log"):
+    if tool_name in ("get_git_status", "get_git_recent_commits", "git_status", "git_log", "git_recent_commits"):
         return any(w in q for w in ["git", "branch", "commit", "working tree", "repo", "repository", "diff", "staged", "untracked"])
 
     # 6. Test & Project inspection tools
-    if tool_name in ("get_test_summary", "test_summary", "run_project_tests", "test_execution"):
+    if tool_name in ("get_test_summary", "test_summary", "run_project_tests", "run_tests", "test_execution"):
         return any(w in q for w in ["test", "tests", "pytest", "unit test", "suite", "fail", "failing", "assert", "debug", "error"])
 
     # 7. Project log tools
     if tool_name == "read_project_log":
         return any(w in q for w in ["log", "logs", "error", "errors", "exception", "traceback", "debug", "issue", "problem"])
 
-    # 8. Action tools
+    # 8. Action & Mutation tools
+    if tool_name == "create_project_backup":
+        return any(w in q for w in ["backup", "archive", "tar", "snapshot"])
+
+    if tool_name == "write_project_file":
+        return any(w in q for w in ["write", "create file", "save file", "update file", "modify file"])
+
+    if tool_name == "restart_project_service":
+        return any(w in q for w in ["restart", "reload", "service"])
+
     if tool_name in ("open_terminal", "open_browser", "launch_application"):
         return any(w in q for w in ["open", "launch", "start", "run application", "browser", "terminal"])
 
@@ -269,6 +278,20 @@ STRICT RULES:
                     PlanStep(tool="check_network_connectivity", explanation="Verify outbound internet connection"),
                     PlanStep(tool="check_dns_resolution", parameters={"domain": "github.com"}, explanation="Verify DNS resolution"),
                 ],
+            )
+
+        if "backup" in lower:
+            return AgentPlan(
+                intent="project_backup",
+                goal="Create and verify project backup",
+                steps=[PlanStep(tool="create_project_backup", parameters={}, explanation="Create project backup archive")],
+            )
+
+        if "test" in lower and not any(w in lower for w in ["why", "failing", "fail", "broken"]):
+            return AgentPlan(
+                intent="project_testing",
+                goal="Run project automated tests",
+                steps=[PlanStep(tool="run_tests", parameters={}, explanation="Run project pytest suite")],
             )
 
         if any(w in lower for w in ["list files", "show files", "project files"]):

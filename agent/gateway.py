@@ -179,13 +179,52 @@ class AgentGateway:
             normalization_ms=round(norm_ms, 2),
         )
 
-        # 0b. Route Classification (Deterministic & executed BEFORE any LLM call)
+        # 0b. Arbitrary Shell Command Defense Guard (Zero LLM overhead)
+        from security.policy import is_arbitrary_shell_attempt
+        from security.audit import audit_logger
+        is_shell, shell_reason = is_arbitrary_shell_attempt(clean_input)
+        if not is_shell and user_input != clean_input:
+            is_shell, shell_reason = is_arbitrary_shell_attempt(user_input)
+
+        if is_shell:
+            logger.warning(f"Arbitrary shell command attempt blocked: '{clean_input}' ({shell_reason})")
+            audit_logger.log_event(
+                user_request=clean_input,
+                tool="arbitrary_shell_execution",
+                arguments={"raw_input": user_input},
+                permission_level="admin",
+                risk_level="critical",
+                confirmation_status="BLOCKED",
+                result=None,
+                duration_ms=0.0,
+                success=False,
+                error=shell_reason,
+            )
+            blocked_response = AgentResponse(
+                answer="🚫 **Security Policy Violation**: Arbitrary shell command execution is strictly forbidden.\nCyberJarvis executes only registered, permissioned tools.",
+                spoken_summary="Security violation. Arbitrary shell commands are strictly forbidden.",
+                completed=True,
+                planning_ms=0.0,
+                evaluator_ms=0.0,
+            )
+            total_duration = breakdown.stt_ms + (time.perf_counter() - start_time) * 1000
+            breakdown.total_ms = round(total_duration, 2)
+            breakdown.execution_path = "SECURITY_BLOCKED"
+            return GatewayResult(
+                response=blocked_response,
+                route="security_blocked",
+                latency=breakdown,
+                source=source,
+                execution_path="SECURITY_BLOCKED",
+            )
+
+        # 0c. Route Classification (Deterministic & executed BEFORE any LLM call)
         router_start = time.perf_counter()
         route_decision = self.router.classify(clean_input)
         router_ms = (time.perf_counter() - router_start) * 1000
         breakdown.router_ms = round(router_ms, 2)
 
-        # 0c. Incomplete Transcript Guard (Section 3, 5, 7, 8, 9 - Zero LLM call)
+        # 0d. Incomplete Transcript Guard (Section 3, 5, 7, 8, 9 - Zero LLM call)
         if (
             route_decision == RouteType.CLARIFICATION
             or is_incomplete_transcript(clean_input)

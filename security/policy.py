@@ -13,6 +13,33 @@ class PermissionLevel(str, Enum):
     READ_ONLY = "read_only"
     MUTATING = "mutating"
     PRIVILEGED = "privileged"
+    ADMIN = "admin"
+
+
+DANGEROUS_SHELL_PATTERNS = [
+    r"\brm\s+-(?:rf|fr|r|f)\b",
+    r"\bmkfs\b",
+    r"\bdd\s+if=",
+    r"\bchmod\s+-[rR]\s+777\b",
+    r":\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:",  # fork bomb
+    r"curl\s+[^|]+\|\s*(?:ba)?sh",
+    r"wget\s+[^|]+\|\s*(?:ba)?sh",
+    r"\b(?:bash|sh|zsh)\s+-c\b",
+    r"\bexecute\s+(?:arbitrary\s+)?(?:shell|bash|command)\b",
+    r"\brun\s+(?:this\s+)?arbitrary\s+(?:shell|command)\b",
+    r"\beval\s*\(",
+    r"\bexec\s*\(",
+]
+
+
+def is_arbitrary_shell_attempt(query: str) -> tuple[bool, str]:
+    """Detect if a user query is attempting to execute arbitrary shell commands."""
+    import re
+    q = query.lower()
+    for pat in DANGEROUS_SHELL_PATTERNS:
+        if re.search(pat, q):
+            return True, f"Security Violation: Dangerous pattern or arbitrary shell execution detected matching '{pat}'."
+    return False, ""
 
 
 class PolicyDecision(NamedTuple):

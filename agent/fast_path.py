@@ -494,12 +494,9 @@ class FastPathHandler:
         )
 
     def _handle_git_status_query(self) -> AgentResponse:
-        from tools.git_tools import get_git_status
-        start_t = time.perf_counter()
-        status = get_git_status()
-        dur_ms = (time.perf_counter() - start_t) * 1000
-        step = PlanStep(tool="get_git_status", parameters={}, explanation="Check Git status")
-        result = ToolResult(tool_name="get_git_status", success=True, output=status, duration_ms=round(dur_ms, 2))
+        result = registry.execute("git_status", user_request="check git status")
+        status = result.output if isinstance(result.output, dict) else {}
+        step = PlanStep(tool="git_status", parameters={}, explanation="Check Git status")
 
         branch = status.get("branch", "unknown")
         is_clean = status.get("is_clean", False)

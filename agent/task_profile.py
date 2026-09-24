@@ -15,6 +15,8 @@ class AgentTaskProfile(str, Enum):
     PROJECT_INSPECTION = "PROJECT_INSPECTION"
     PROJECT_DEBUGGING = "PROJECT_DEBUGGING"
     DEPLOYMENT_PLANNING = "DEPLOYMENT_PLANNING"
+    PROJECT_TESTING = "PROJECT_TESTING"
+    PROJECT_BACKUP = "PROJECT_BACKUP"
     GENERAL_PLANNING = "GENERAL_PLANNING"
 
 
@@ -28,6 +30,23 @@ def classify_agent_task_profile(query: str) -> AgentTaskProfile:
         return AgentTaskProfile.GENERAL_PLANNING
 
     q = query.lower().strip()
+
+    # 0a. PROJECT_TESTING (Secure action: run tests)
+    if any(p in q for p in [
+        "run my tests", "run tests", "run the tests", "run project tests",
+        "execute tests", "execute my tests", "run pytest", "test my project",
+        "test project", "run our tests"
+    ]) or (re.search(r"\brun\b", q) and "test" in q and not any(w in q for w in ["why", "failing", "fail", "broken", "debug"])):
+        logger.info(f"Agent Task Profile: PROJECT_TESTING for query: '{query}'")
+        return AgentTaskProfile.PROJECT_TESTING
+
+    # 0b. PROJECT_BACKUP (Secure action: create project backup)
+    if any(p in q for p in [
+        "create a backup", "create backup", "backup my project", "backup the project",
+        "make a backup", "take a backup", "backup project", "project backup"
+    ]) or ("backup" in q and any(w in q for w in ["create", "make", "take", "project", "my", "cyberjarvis"])):
+        logger.info(f"Agent Task Profile: PROJECT_BACKUP for query: '{query}'")
+        return AgentTaskProfile.PROJECT_BACKUP
 
     # 1. DEPLOYMENT_PLANNING
     # Examples:

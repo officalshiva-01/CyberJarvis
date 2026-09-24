@@ -48,6 +48,8 @@ class PlanExecutor:
             else:
                 mutating_steps.append(step)
 
+        user_req = getattr(plan, "user_request", None) or plan.goal or plan.intent
+
         # 1. Parallel execution for multiple independent read-only tools
         if len(readonly_steps) > 1:
             tool_names = [s.tool for s in readonly_steps]
@@ -63,6 +65,7 @@ class PlanExecutor:
                         parameters=step.parameters,
                         policy=self.policy,
                         confirmation_handler=self.confirmation_handler,
+                        user_request=user_req,
                     )
 
             max_workers = min(len(readonly_steps), 8)
@@ -88,6 +91,7 @@ class PlanExecutor:
                     parameters=step.parameters,
                     policy=self.policy,
                     confirmation_handler=self.confirmation_handler,
+                    user_request=user_req,
                 )
                 results.append(res)
                 executed_tools.add(step.tool)
@@ -103,6 +107,7 @@ class PlanExecutor:
                     parameters=step.parameters,
                     policy=self.policy,
                     confirmation_handler=self.confirmation_handler,
+                    user_request=user_req,
                 )
                 results.append(res)
                 executed_tools.add(step.tool)

@@ -24,7 +24,35 @@ class VoiceAssistantLoop:
         def on_agent_status(status_msg: str):
             print(f"  ⏳ {status_msg}")
 
-        self.gateway = gateway or AgentGateway(on_status_change=on_agent_status)
+        def voice_confirm(prompt_text: str) -> bool:
+            clean_prompt = prompt_text.replace("[y/N]", "").strip()
+            print(f"\n🔊 [Confirmation Request]: {clean_prompt}")
+            self.tts.speak(clean_prompt, blocking=True)
+            print("🎤 Listening for authorization (say 'yes' to confirm or 'no' to cancel)...")
+            ans = self.stt.listen_and_transcribe()
+            if not ans:
+                return False
+            clean_ans = ans.lower().strip()
+            authorized = any(w in clean_ans for w in ["yes", "y", "proceed", "confirm", "sure", "ok", "okay", "ha", "haan"])
+            print(f"Voice confirmation response: '{clean_ans}' -> {'CONFIRMED' if authorized else 'REJECTED'}")
+            return authorized
+
+        if gateway is None:
+            from security.confirmation import ConfirmationHandler
+            from agent.agent_core import AgentCore
+            from agent.executor import PlanExecutor
+            from security.policy import SecurityPolicy
+
+            conf_handler = ConfirmationHandler(voice_prompt_fn=voice_confirm)
+            executor = PlanExecutor(
+                policy=SecurityPolicy(),
+                confirmation_handler=conf_handler,
+                step_callback=lambda s: print(f"  🔧 {s}"),
+            )
+            agent_core = AgentCore(executor=executor, on_status_change=on_agent_status)
+            self.gateway = AgentGateway(agent_core=agent_core, on_status_change=on_agent_status)
+        else:
+            self.gateway = gateway
 
     def run(self):
         mic_info = self.stt.get_microphone_info()

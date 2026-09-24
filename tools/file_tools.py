@@ -69,6 +69,52 @@ def read_project_file(filename: str) -> Dict[str, Any]:
 
 
 @registry.register(
+    name="write_project_file",
+    description="Write or update a text file securely within the CyberJarvis project root. (MUTATING, REQUIRES CONFIRMATION)",
+    parameters={
+        "filename": {"type": "string", "description": "Relative filename to write inside project", "required": True},
+        "content": {"type": "string", "description": "Text content to write", "required": True},
+    },
+    permission_level=PermissionLevel.MUTATING,
+    is_read_only=False,
+    risk_level=RiskLevel.MEDIUM,
+    timeout=10.0,
+    requires_confirmation=True,
+    reversible=False,
+)
+def write_project_file(filename: str, content: str) -> Dict[str, Any]:
+    safe, reason = is_path_safe_for_project(filename)
+    if not safe:
+        return {"success": False, "verified": False, "error": reason}
+
+    target = (PROJECT_ROOT / filename).resolve()
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+        # Result verification:
+        if not target.is_file():
+            return {"success": False, "verified": False, "error": f"Verification failed: '{filename}' does not exist on disk."}
+        written_size = target.stat().st_size
+        expected_size = len(content.encode("utf-8"))
+        if written_size != expected_size:
+            return {"success": False, "verified": False, "error": f"Verification failed: size mismatch ({written_size} != {expected_size})."}
+        read_back = target.read_text(encoding="utf-8")
+        if read_back != content:
+            return {"success": False, "verified": False, "error": "Verification failed: file content mismatch on disk."}
+
+        return {
+            "success": True,
+            "verified": True,
+            "filename": filename,
+            "size_bytes": written_size,
+            "message": f"Successfully wrote and verified '{filename}' ({written_size} bytes).",
+        }
+    except Exception as ex:
+        return {"success": False, "verified": False, "error": f"Failed to write '{filename}': {ex}"}
+
+
+@registry.register(
     name="delete_project_file",
     description="Delete a temporary or unused file in the project. (MUTATING, REQUIRES CONFIRMATION)",
     parameters={
@@ -77,20 +123,28 @@ def read_project_file(filename: str) -> Dict[str, Any]:
     permission_level=PermissionLevel.MUTATING,
     is_read_only=False,
     risk_level=RiskLevel.HIGH,
+    timeout=10.0,
+    requires_confirmation=True,
+    reversible=False,
 )
 def delete_project_file(filename: str) -> Dict[str, Any]:
     safe, reason = is_path_safe_for_project(filename)
     if not safe:
-        return {"error": reason}
+        return {"success": False, "verified": False, "error": reason}
 
     target = (PROJECT_ROOT / filename).resolve()
     if not target.exists():
-        return {"error": f"File '{filename}' does not exist."}
+        return {"success": False, "verified": False, "error": f"File '{filename}' does not exist."}
     if not target.is_file():
-        return {"error": f"Cannot delete '{filename}': not a regular file."}
+        return {"success": False, "verified": False, "error": f"Cannot delete '{filename}': not a regular file."}
 
     try:
         target.unlink()
-        return {"success": True, "message": f"Successfully deleted '{filename}'."}
+        verified = not target.exists()
+        return {
+            "success": verified,
+            "verified": verified,
+            "message": f"Successfully deleted '{filename}'." if verified else f"Failed to verify deletion of '{filename}'."
+        }
     except Exception as ex:
-        return {"error": f"Failed to delete '{filename}': {ex}"}
+        return {"success": False, "verified": False, "error": f"Failed to delete '{filename}': {ex}"}

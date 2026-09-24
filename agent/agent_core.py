@@ -1,6 +1,6 @@
 import time
 from typing import Optional, Callable
-from agent.schemas import AgentResponse
+from agent.schemas import AgentResponse, AgentPlan, PlanStep
 from agent.state import ConversationState, Turn
 from agent.planner import Planner
 from agent.executor import PlanExecutor
@@ -50,6 +50,32 @@ class AgentCore:
 
         logger.info(f"Processing user input: '{user_input_clean}'")
 
+        # 0. Arbitrary Shell Command Defense Guard
+        from security.policy import is_arbitrary_shell_attempt
+        from security.audit import audit_logger
+        is_shell, shell_reason = is_arbitrary_shell_attempt(user_input_clean)
+        if is_shell:
+            logger.warning(f"Arbitrary shell command attempt blocked: '{user_input_clean}' ({shell_reason})")
+            audit_logger.log_event(
+                user_request=user_input_clean,
+                tool="arbitrary_shell_execution",
+                arguments={"raw_input": user_input_clean},
+                permission_level="admin",
+                risk_level="critical",
+                confirmation_status="BLOCKED",
+                result=None,
+                duration_ms=0.0,
+                success=False,
+                error=shell_reason,
+            )
+            return AgentResponse(
+                answer="🚫 **Security Policy Violation**: Arbitrary shell command execution is strictly forbidden.\nCyberJarvis executes only registered, permissioned tools.",
+                spoken_summary="Security violation. Arbitrary shell commands are strictly forbidden.",
+                completed=True,
+                planning_ms=0.0,
+                evaluator_ms=0.0,
+            )
+
         # 1. Check for personal facts to save
         self._detect_and_save_fact(user_input_clean)
 
@@ -57,6 +83,102 @@ class AgentCore:
         classify_start = time.perf_counter()
         task_profile = classify_agent_task_profile(user_input_clean)
         classification_ms = (time.perf_counter() - classify_start) * 1000
+
+        # Specialized Safe Actions: PROJECT_TESTING
+        if task_profile == AgentTaskProfile.PROJECT_TESTING:
+            self.on_status("🧪 Running project automated tests...")
+            plan = AgentPlan(
+                intent="project_testing",
+                goal=user_input_clean,
+                steps=[PlanStep(tool="run_tests", parameters={}, explanation="Execute pytest suite")],
+            )
+            tool_results = self.executor.execute_plan(plan)
+            res = tool_results[0] if tool_results else None
+            success = res.success if res else False
+            output = res.output if (res and isinstance(res.output, dict)) else {}
+            exit_code = output.get("exit_code", 0 if success else 1)
+            stdout = output.get("stdout", "")
+            target = output.get("target", "tests")
+
+            if success and exit_code == 0:
+                answer = f"✅ **Tests Passed**: All tests passed successfully.\n- Suite: `{target}`\n- Exit Code: `0`\n- Status: **VERIFIED**"
+                if stdout:
+                    answer += f"\n\n```\n{stdout}\n```"
+                spoken_summary = "All tests in your project passed successfully."
+            else:
+                err_msg = output.get("error") or (res.error if res else "Test execution failed")
+                answer = f"❌ **Tests Failed**: Automated tests failed with exit code `{exit_code}`.\n- Suite: `{target}`\n- Error: {err_msg}"
+                if stdout:
+                    answer += f"\n\n```\n{stdout}\n```"
+                spoken_summary = "Automated tests encountered failures."
+
+            self.on_status("✅ Complete")
+            response = AgentResponse(
+                answer=answer,
+                spoken_summary=spoken_summary,
+                plan=plan,
+                tool_results=tool_results,
+                completed=True,
+                planning_ms=0.0,
+                evaluator_ms=0.0,
+                project_profile=task_profile.value,
+                classification_ms=round(classification_ms, 2),
+            )
+            turn = Turn(user_input=user_input_clean, plan=plan, tool_results=tool_results, assistant_response=response.answer)
+            self.state.add_turn(turn)
+            save_memory(user_input_clean, response.answer, memory_type="project")
+            return response
+
+        # Specialized Safe Actions: PROJECT_BACKUP
+        if task_profile == AgentTaskProfile.PROJECT_BACKUP:
+            self.on_status("📦 Creating project backup archive...")
+            plan = AgentPlan(
+                intent="project_backup",
+                goal=user_input_clean,
+                steps=[PlanStep(tool="create_project_backup", parameters={}, explanation="Create compressed archive in backups/")],
+            )
+            tool_results = self.executor.execute_plan(plan)
+            res = tool_results[0] if tool_results else None
+            success = res.success if res else False
+            output = res.output if (res and isinstance(res.output, dict)) else {}
+
+            if success and output.get("verified"):
+                b_path = output.get("backup_path", "")
+                b_size = output.get("size_mb", 0.0)
+                b_count = output.get("files_archived", 0)
+                answer = (
+                    f"📦 **Project Backup Created & Verified**\n\n"
+                    f"- **Location**: `{b_path}`\n"
+                    f"- **Size**: **{b_size} MB**\n"
+                    f"- **Files Archived**: {b_count}\n"
+                    f"- **Integrity Verification**: `VERIFIED (size > 0, valid tar.gz)`"
+                )
+                spoken_summary = f"Project backup was successfully created and verified, size {b_size} megabytes."
+            else:
+                err_msg = res.error if res else "Backup creation cancelled or failed."
+                if "rejected by user" in err_msg.lower():
+                    answer = "⚠️ **Backup Cancelled**: Operation was not authorized by the user."
+                    spoken_summary = "Project backup cancelled."
+                else:
+                    answer = f"❌ **Backup Failed**: {err_msg}"
+                    spoken_summary = "Project backup creation failed."
+
+            self.on_status("✅ Complete")
+            response = AgentResponse(
+                answer=answer,
+                spoken_summary=spoken_summary,
+                plan=plan,
+                tool_results=tool_results,
+                completed=True,
+                planning_ms=0.0,
+                evaluator_ms=0.0,
+                project_profile=task_profile.value,
+                classification_ms=round(classification_ms, 2),
+            )
+            turn = Turn(user_input=user_input_clean, plan=plan, tool_results=tool_results, assistant_response=response.answer)
+            self.state.add_turn(turn)
+            save_memory(user_input_clean, response.answer, memory_type="project")
+            return response
 
         # Deterministic Profiles: PROJECT_ARCHITECTURE, PROJECT_INSPECTION, PROJECT_DEBUGGING, DEPLOYMENT_PLANNING
         deterministic_statuses = {

@@ -297,6 +297,15 @@ class ExecutionRouter:
             "analyze this error",
             "analyze error",
             "current issue",
+            "backup",
+            "create a backup",
+            "create backup",
+            "run my tests",
+            "run tests",
+            "run the tests",
+            "run project tests",
+            "execute tests",
+            "restart service",
         ]
 
         # Specific CyberJarvis / Project inspection requests
@@ -324,7 +333,7 @@ class ExecutionRouter:
         if any(w in text for w in ["git branch", "git commit", "git diff", "git log", "recent commits"]):
             return True
 
-        if any(w in text for w in ["search files", "find files", "run tests", "execute script"]):
+        if any(w in text for w in ["search files", "find files", "run tests", "run my tests", "run the tests", "execute tests", "backup", "execute script"]):
             return True
 
         return False

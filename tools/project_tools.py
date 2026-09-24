@@ -52,6 +52,9 @@ def test_summary() -> Dict[str, Any]:
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    timeout=60.0,
+    requires_confirmation=False,
+    reversible=True,
 )
 def run_project_tests(test_target: str = "", max_fail: int = 1) -> Dict[str, Any]:
     python_bin = sys.executable or "python"
@@ -64,7 +67,7 @@ def run_project_tests(test_target: str = "", max_fail: int = 1) -> Dict[str, Any
             cwd=str(PROJECT_ROOT),
             capture_output=True,
             text=True,
-            timeout=8.0,
+            timeout=50.0,
         )
         return {
             "target": target,
@@ -72,13 +75,15 @@ def run_project_tests(test_target: str = "", max_fail: int = 1) -> Dict[str, Any
             "success": res.returncode == 0,
             "stdout": res.stdout[-1000:].strip() if res.stdout else "",
             "stderr": res.stderr[-500:].strip() if res.stderr else "",
+            "verified": True,
         }
     except subprocess.TimeoutExpired:
         return {
             "target": target,
             "exit_code": -1,
             "success": False,
-            "error": "Test run timed out after 8.0s",
+            "error": "Test run timed out after 50.0s",
+            "verified": False,
         }
     except Exception as ex:
         return {
@@ -86,7 +91,25 @@ def run_project_tests(test_target: str = "", max_fail: int = 1) -> Dict[str, Any
             "exit_code": -1,
             "success": False,
             "error": str(ex),
+            "verified": False,
         }
+
+
+@registry.register(
+    name="run_tests",
+    description="Run automated pytest test suite in the CyberJarvis project.",
+    parameters={
+        "test_target": {"type": "string", "description": "Specific test file to run (default: test_agent_core.py)", "default": ""},
+    },
+    permission_level=PermissionLevel.READ_ONLY,
+    is_read_only=True,
+    risk_level=RiskLevel.LOW,
+    timeout=60.0,
+    requires_confirmation=False,
+    reversible=True,
+)
+def run_tests(test_target: str = "") -> Dict[str, Any]:
+    return run_project_tests(test_target=test_target)
 
 
 @registry.register(
@@ -98,6 +121,9 @@ def run_project_tests(test_target: str = "", max_fail: int = 1) -> Dict[str, Any
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    timeout=60.0,
+    requires_confirmation=False,
+    reversible=True,
 )
 def test_execution(test_target: str = "") -> Dict[str, Any]:
     return run_project_tests(test_target=test_target)

@@ -116,3 +116,26 @@ def diagnose_system_bottleneck() -> Dict[str, Any]:
         "top_memory_consumers": top_mem_procs,
         "top_cpu_consumers": top_cpu_procs,
     }
+
+
+@registry.register(
+    name="get_system_health",
+    description="Get system health summary including CPU, RAM, disk, and overall status verdict.",
+    parameters={},
+    permission_level=PermissionLevel.READ_ONLY,
+    is_read_only=True,
+    risk_level=RiskLevel.LOW,
+    timeout=10.0,
+    requires_confirmation=False,
+    reversible=True,
+)
+def get_system_health() -> Dict[str, Any]:
+    diag = diagnose_system_bottleneck()
+    return {
+        "verdict": diag.get("verdict", "HEALTHY"),
+        "summary": diag.get("summary", ""),
+        "metrics": diag.get("metrics", {}),
+        "issues": diag.get("issues", []),
+        "recommendations": diag.get("recommendations", []),
+        "verified": True,
+    }
