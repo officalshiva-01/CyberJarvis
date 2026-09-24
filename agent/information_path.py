@@ -47,21 +47,12 @@ class InformationPathHandler:
             "5. Provide a very concise 1-2 sentence spoken summary at the end under 'SUMMARY: <text>'."
         )
 
-        # Contextual relevance from memory facts ONLY if the user explicitly asks for personalized advice
-        lower_input = clean_input.lower()
-        explicit_personalized_triggers = [
-            "for me", "my career", "my goal", "my background", "give me advice",
-            "advise me", "based on my", "tailor for me", "personalized",
-            "for my situation", "about me", "my project", "my roadmap",
-        ]
-        context_lines = []
-        if any(trig in lower_input for trig in explicit_personalized_triggers):
-            facts = get_facts(limit=5)
-            if facts:
-                for f in facts:
-                    context_lines.append(f"- {f}")
-        if context_lines:
-            system_prompt += "\nUser background context (use only because user requested personalized advice):\n" + "\n".join(context_lines)
+        # Contextual relevance from memory ONLY if the user explicitly asks for personalized advice (Requirement 12 & 16)
+        from memory.context_builder import MemoryContextBuilder
+        mem_builder = MemoryContextBuilder()
+        info_mem_ctx = mem_builder.build_information_context(clean_input)
+        if info_mem_ctx:
+            system_prompt += f"\nUser background context (use only because user requested personalized advice):\n{info_mem_ctx}"
 
         messages = [
             {"role": "system", "content": system_prompt},

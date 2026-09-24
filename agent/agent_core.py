@@ -76,8 +76,13 @@ class AgentCore:
                 evaluator_ms=0.0,
             )
 
-        # 1. Check for personal facts to save
+        # 1. Check for personal facts to save & auto-extract structured memories
         self._detect_and_save_fact(user_input_clean)
+        try:
+            from memory.extraction import auto_extract_and_save_memory
+            auto_extract_and_save_memory(user_input_clean, source="user")
+        except Exception as ex:
+            logger.debug(f"Auto memory extraction skipped: {ex}")
 
         # 2. Agent Task Profile Classification
         classify_start = time.perf_counter()
@@ -384,7 +389,7 @@ class AgentCore:
             # 2. Evidence Extraction: structured repository facts extraction
             self.on_status(evidence_msg)
             evidence_start = time.perf_counter()
-            evidence = self.project_collector.collect_evidence_for_profile(task_profile, tool_results)
+            evidence = self.project_collector.collect_evidence_for_profile(task_profile, tool_results, query=user_input_clean)
             evidence_ms = (time.perf_counter() - evidence_start) * 1000
 
             # 3. LLM Synthesis: bounded Ollama call with timeout failsafe
@@ -432,6 +437,12 @@ class AgentCore:
         # 3. General Open-Ended Planning Phase
         self.on_status("🧠 Planning...")
         plan_start = time.perf_counter()
+
+        # Phase 7 Memory Integration: Bounded context builder for GENERAL_PLANNING
+        from memory.context_builder import MemoryContextBuilder
+        mem_builder = MemoryContextBuilder()
+        mem_context = mem_builder.build_context(user_input_clean, task_profile="GENERAL_PLANNING")
+
         plan = self.planner.plan(user_input_clean, state=self.state)
         planning_ms = (time.perf_counter() - plan_start) * 1000
         logger.info(f"Generated plan in {planning_ms:.1f}ms: intent='{plan.intent}', goal='{plan.goal}', steps={len(plan.steps)}")
@@ -443,6 +454,9 @@ class AgentCore:
 
         # 5. Evaluation / Synthesis phase
         facts = get_facts(limit=10)
+        if mem_context:
+            mem_lines = [l.strip("- ").strip() for l in mem_context.splitlines() if l.strip() and not l.startswith("#")]
+            facts = mem_lines + [f for f in facts if f not in mem_lines]
         if not tool_results:
             logger.info("No tools executed. Skipping heavy evaluator synthesis.")
             evaluator_ms = 0.0

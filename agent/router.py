@@ -505,13 +505,16 @@ class ExecutionRouter:
         if any(p in text for p in ["who are you", "what are you", "what is cyberjarvis", "introduce yourself", "tum kaun ho", "what is your name", "what's your name", "tumhara naam kya hai"]):
             return True
 
-        # Facts: Profile / Identity (Phase 5)
+        # Facts: Profile / Identity (Phase 5 & 7)
         profile_phrases = [
             "tell me about me",
             "tell me about myself",
             "who am i",
             "describe me",
             "what do you know about me",
+            "what do you remember about me",
+            "what do you remember",
+            "what all do you remember",
             "my profile",
             "mere bare mein batao",
             "mere baare mein batao",
@@ -521,6 +524,42 @@ class ExecutionRouter:
             "about myself",
         ]
         if any(p in text for p in profile_phrases):
+            return True
+
+        # Project Status & Continuity (Phase 7)
+        status_phrases = [
+            "what is the current cyberjarvis project status",
+            "what is the current cyberjarvis status",
+            "what is current cyberjarvis project status",
+            "what is cyberjarvis project status",
+            "what is current project status",
+            "what is project status",
+            "current project status",
+            "cyberjarvis project status",
+            "cyberjarvis status",
+            "project status",
+        ]
+        if any(p in text for p in status_phrases):
+            return True
+
+        # Task Continuity & Decisions (Phase 7)
+        continuity_phrases = [
+            "what were we working on",
+            "what was i working on",
+            "what are we working on",
+            "continue my previous task",
+            "continue previous task",
+            "continue task",
+            "what did we decide about stt",
+            "what did we decide",
+            "what was decided",
+            "what decisions did we make",
+        ]
+        if any(p in text for p in continuity_phrases):
+            return True
+
+        # Memory management commands (Phase 7)
+        if text.startswith(("remember this", "remember that", "remember :", "remember:", "forget this", "forget that", "forget :", "forget:")):
             return True
 
         # Facts: Name

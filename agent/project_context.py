@@ -494,7 +494,7 @@ class ProjectContextCollector:
         )
 
 
-    def collect_evidence(self, tool_results: Optional[List[ToolResult]] = None) -> Dict[str, Any]:
+    def collect_evidence(self, tool_results: Optional[List[ToolResult]] = None, query: str = "") -> Dict[str, Any]:
         """
         Process repository files and tool results into structured, bounded evidence.
         Runs deterministic ArchitectureMapper scan to ground all facts.
@@ -534,21 +534,34 @@ class ProjectContextCollector:
                     elif "gateway" in fn.lower():
                         evidence["gateway_excerpt"] = content[:MAX_FILE_CHARS]
 
+        # Phase 7 Memory Integration: Bounded MemoryContextBuilder injection
+        try:
+            from memory.context_builder import MemoryContextBuilder
+            mem_builder = MemoryContextBuilder()
+            mem_ctx = mem_builder.build_context(query or "project architecture", task_profile="PROJECT_ARCHITECTURE", limit=6)
+            if mem_ctx:
+                evidence["memory_context"] = mem_ctx
+                rem = MAX_SYNTHESIS_CONTEXT_CHARS - len(evidence["structured_context"]) - 40
+                if rem > 100:
+                    evidence["structured_context"] = (evidence["structured_context"] + f"\n\n### Project Memory Context\n{mem_ctx[:rem]}")[:MAX_SYNTHESIS_CONTEXT_CHARS]
+        except Exception as ex:
+            logger.debug(f"Memory context collection skipped: {ex}")
+
         return evidence
 
-    def collect_evidence_for_profile(self, profile: AgentTaskProfile, tool_results: Optional[List[ToolResult]] = None) -> Dict[str, Any]:
+    def collect_evidence_for_profile(self, profile: AgentTaskProfile, tool_results: Optional[List[ToolResult]] = None, query: str = "") -> Dict[str, Any]:
         """Collect bounded structured evidence for the specified deterministic profile."""
         if profile == AgentTaskProfile.PROJECT_INSPECTION:
-            return self.collect_inspection_evidence(tool_results)
+            return self.collect_inspection_evidence(tool_results, query=query)
         elif profile == AgentTaskProfile.PROJECT_DEBUGGING:
-            return self.collect_debugging_evidence(tool_results)
+            return self.collect_debugging_evidence(tool_results, query=query)
         elif profile == AgentTaskProfile.DEPLOYMENT_PLANNING:
-            return self.collect_deployment_evidence(tool_results)
+            return self.collect_deployment_evidence(tool_results, query=query)
         elif profile == AgentTaskProfile.PROJECT_ARCHITECTURE:
-            return self.collect_evidence(tool_results)
+            return self.collect_evidence(tool_results, query=query)
         raise ValueError(f"Unknown deterministic profile: {profile}")
 
-    def collect_inspection_evidence(self, tool_results: Optional[List[ToolResult]] = None) -> Dict[str, Any]:
+    def collect_inspection_evidence(self, tool_results: Optional[List[ToolResult]] = None, query: str = "") -> Dict[str, Any]:
         """Process project inspection tool outputs into bounded structured evidence."""
         components = self.mapper.scan_components()
         evidence: Dict[str, Any] = {
@@ -606,9 +619,23 @@ class ProjectContextCollector:
             lines.append(f"- Documentation: {evidence['readme_excerpt'][:200]}")
 
         evidence["structured_context"] = "\n".join(lines)[:MAX_SYNTHESIS_CONTEXT_CHARS]
+
+        # Phase 7 Memory Integration
+        try:
+            from memory.context_builder import MemoryContextBuilder
+            mem_builder = MemoryContextBuilder()
+            mem_ctx = mem_builder.build_context(query or "project inspection", task_profile="PROJECT_INSPECTION", limit=6)
+            if mem_ctx:
+                evidence["memory_context"] = mem_ctx
+                rem = MAX_SYNTHESIS_CONTEXT_CHARS - len(evidence["structured_context"]) - 40
+                if rem > 100:
+                    evidence["structured_context"] = (evidence["structured_context"] + f"\n\n### Project Memory Context\n{mem_ctx[:rem]}")[:MAX_SYNTHESIS_CONTEXT_CHARS]
+        except Exception as ex:
+            logger.debug(f"Memory context collection skipped: {ex}")
+
         return evidence
 
-    def collect_debugging_evidence(self, tool_results: Optional[List[ToolResult]] = None) -> Dict[str, Any]:
+    def collect_debugging_evidence(self, tool_results: Optional[List[ToolResult]] = None, query: str = "") -> Dict[str, Any]:
         """Process debugging tool outputs into bounded structured evidence."""
         components = self.mapper.scan_components()
         evidence: Dict[str, Any] = {
@@ -651,9 +678,23 @@ class ProjectContextCollector:
             lines.append(f"- Working Tree Changes: {changes_str}")
 
         evidence["structured_context"] = "\n".join(lines)[:MAX_SYNTHESIS_CONTEXT_CHARS]
+
+        # Phase 7 Memory Integration
+        try:
+            from memory.context_builder import MemoryContextBuilder
+            mem_builder = MemoryContextBuilder()
+            mem_ctx = mem_builder.build_context(query or "project debugging", task_profile="PROJECT_DEBUGGING", limit=6)
+            if mem_ctx:
+                evidence["memory_context"] = mem_ctx
+                rem = MAX_SYNTHESIS_CONTEXT_CHARS - len(evidence["structured_context"]) - 40
+                if rem > 100:
+                    evidence["structured_context"] = (evidence["structured_context"] + f"\n\n### Project Memory Context\n{mem_ctx[:rem]}")[:MAX_SYNTHESIS_CONTEXT_CHARS]
+        except Exception as ex:
+            logger.debug(f"Memory context collection skipped: {ex}")
+
         return evidence
 
-    def collect_deployment_evidence(self, tool_results: Optional[List[ToolResult]] = None) -> Dict[str, Any]:
+    def collect_deployment_evidence(self, tool_results: Optional[List[ToolResult]] = None, query: str = "") -> Dict[str, Any]:
         """Process deployment planning tool outputs into bounded structured evidence."""
         components = self.mapper.scan_components()
         evidence: Dict[str, Any] = {
@@ -691,6 +732,20 @@ class ProjectContextCollector:
         ]
 
         evidence["structured_context"] = "\n".join(lines)[:MAX_SYNTHESIS_CONTEXT_CHARS]
+
+        # Phase 7 Memory Integration
+        try:
+            from memory.context_builder import MemoryContextBuilder
+            mem_builder = MemoryContextBuilder()
+            mem_ctx = mem_builder.build_context(query or "deployment planning", task_profile="DEPLOYMENT_PLANNING", limit=6)
+            if mem_ctx:
+                evidence["memory_context"] = mem_ctx
+                rem = MAX_SYNTHESIS_CONTEXT_CHARS - len(evidence["structured_context"]) - 40
+                if rem > 100:
+                    evidence["structured_context"] = (evidence["structured_context"] + f"\n\n### Project Memory Context\n{mem_ctx[:rem]}")[:MAX_SYNTHESIS_CONTEXT_CHARS]
+        except Exception as ex:
+            logger.debug(f"Memory context collection skipped: {ex}")
+
         return evidence
 
 
@@ -709,7 +764,7 @@ class ProjectContextCollector:
         """
         synth_start = time.perf_counter()
         if evidence is None:
-            evidence = self.collect_evidence(tool_results)
+            evidence = self.collect_evidence(tool_results, query=query)
 
         structured_context = evidence.get("structured_context", "")
         if not structured_context:
@@ -834,7 +889,7 @@ class ProjectContextCollector:
         """Synthesize bounded project inspection analysis via Ollama with failsafe timeout."""
         synth_start = time.perf_counter()
         if evidence is None:
-            evidence = self.collect_inspection_evidence(tool_results)
+            evidence = self.collect_inspection_evidence(tool_results, query=query)
 
         structured_context = evidence.get("structured_context", "")
 
@@ -915,7 +970,7 @@ class ProjectContextCollector:
         """Synthesize bounded project debugging analysis via Ollama with failsafe timeout."""
         synth_start = time.perf_counter()
         if evidence is None:
-            evidence = self.collect_debugging_evidence(tool_results)
+            evidence = self.collect_debugging_evidence(tool_results, query=query)
 
         structured_context = evidence.get("structured_context", "")
 
@@ -998,7 +1053,7 @@ class ProjectContextCollector:
         """Synthesize bounded deployment planning via Ollama with failsafe timeout."""
         synth_start = time.perf_counter()
         if evidence is None:
-            evidence = self.collect_deployment_evidence(tool_results)
+            evidence = self.collect_deployment_evidence(tool_results, query=query)
 
         structured_context = evidence.get("structured_context", "")
 
