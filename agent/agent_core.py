@@ -58,26 +58,35 @@ class AgentCore:
         task_profile = classify_agent_task_profile(user_input_clean)
         classification_ms = (time.perf_counter() - classify_start) * 1000
 
-        # Special Deterministic Profile: PROJECT_ARCHITECTURE
-        if task_profile == AgentTaskProfile.PROJECT_ARCHITECTURE:
+        # Deterministic Profiles: PROJECT_ARCHITECTURE, PROJECT_INSPECTION, PROJECT_DEBUGGING, DEPLOYMENT_PLANNING
+        deterministic_statuses = {
+            AgentTaskProfile.PROJECT_ARCHITECTURE: ("📁 Inspecting project architecture...", "🔍 Extracting architecture evidence...", "🧠 Synthesizing architecture analysis..."),
+            AgentTaskProfile.PROJECT_INSPECTION: ("📁 Inspecting project structure...", "🔍 Extracting inspection evidence...", "🧠 Synthesizing project inspection..."),
+            AgentTaskProfile.PROJECT_DEBUGGING: ("🐞 Debugging project issues...", "🔍 Extracting debugging evidence...", "🧠 Synthesizing debugging analysis..."),
+            AgentTaskProfile.DEPLOYMENT_PLANNING: ("🚀 Planning deployment architecture...", "🔍 Extracting deployment evidence...", "🧠 Synthesizing deployment plan..."),
+        }
+
+        if task_profile in deterministic_statuses:
+            scan_msg, evidence_msg, synth_msg = deterministic_statuses[task_profile]
             logger.info(f"Executing deterministic AGENT profile: {task_profile.value}")
-            self.on_status("📁 Inspecting project architecture...")
+            self.on_status(scan_msg)
 
             # 1. Repository Scan: plan & execute bounded inspection tools
             scan_start = time.perf_counter()
-            plan = self.project_collector.build_architecture_task_plan(user_input_clean)
+            plan = self.project_collector.build_task_plan(task_profile, user_input_clean)
             tool_results = self.executor.execute_plan(plan)
             repo_scan_ms = (time.perf_counter() - scan_start) * 1000
 
             # 2. Evidence Extraction: structured repository facts extraction
-            self.on_status("🔍 Extracting architecture evidence...")
+            self.on_status(evidence_msg)
             evidence_start = time.perf_counter()
-            evidence = self.project_collector.collect_evidence(tool_results)
+            evidence = self.project_collector.collect_evidence_for_profile(task_profile, tool_results)
             evidence_ms = (time.perf_counter() - evidence_start) * 1000
 
             # 3. LLM Synthesis: bounded Ollama call with timeout failsafe
-            self.on_status("🧠 Synthesizing architecture analysis...")
-            synth_res = self.project_collector.synthesize_architecture(
+            self.on_status(synth_msg)
+            synth_res = self.project_collector.synthesize_profile(
+                profile=task_profile,
                 query=user_input_clean,
                 tool_results=tool_results,
                 evidence=evidence,

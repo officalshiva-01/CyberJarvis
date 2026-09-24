@@ -286,17 +286,28 @@ class ExecutionRouter:
             "multi-step",
             "deadlock",
             "diagnostic log",
+            "debug",
+            "tests failing",
+            "test failing",
+            "failing tests",
+            "why are my tests failing",
+            "tests error",
+            "find the problem",
+            "problem in my project",
+            "analyze this error",
+            "analyze error",
+            "current issue",
         ]
 
         # Specific CyberJarvis / Project inspection requests
         # A phrase should only become AGENT when there is evidence that the user wants
-        # CyberJarvis/project inspection or a multi-step task.
-        inspection_verbs = ("analyze", "inspect", "review", "audit", "explore", "examine", "investigate")
+        # CyberJarvis/project inspection, debugging, deployment, or a multi-step task.
+        inspection_verbs = ("analyze", "inspect", "review", "audit", "explore", "examine", "investigate", "debug", "troubleshoot", "find")
         if any(v in text for v in inspection_verbs):
             if "cyberjarvis" in text:
                 return True
-            if any(t in text for t in ["project", "codebase", "subsystem", "architecture", "repository", "repo"]):
-                if any(ctx in text for ctx in ["my ", "our ", "this project", "the project", "local"]):
+            if any(t in text for t in ["project", "codebase", "subsystem", "architecture", "repository", "repo", "error", "issue", "bug", "test", "tests"]):
+                if any(ctx in text for ctx in ["my ", "our ", "this project", "the project", "local", "current", "this "]):
                     return True
 
         # If it's a general informational question ("what is github", "explain repository", "what is cybersecurity"), don't treat as agent

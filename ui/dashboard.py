@@ -133,8 +133,17 @@ class TerminalDashboard:
             return "Connected" if out.get("connected") else "Offline"
         if r.tool_name == "check_dns_resolution" and isinstance(out, dict):
             return "Resolved" if out.get("success") else "Failed"
-        if r.tool_name == "get_git_status" and isinstance(out, dict):
+        if r.tool_name in ("get_git_status", "git_status") and isinstance(out, dict):
             return "Clean" if out.get("is_clean") else f"{out.get('modified_count', 0)} changes"
+        if r.tool_name in ("get_git_recent_commits", "git_log") and isinstance(out, list):
+            return f"{len(out)} commits"
+        if r.tool_name in ("get_test_summary", "test_summary") and isinstance(out, dict):
+            return f"{out.get('test_file_count', 0)} test files"
+        if r.tool_name in ("run_project_tests", "test_execution") and isinstance(out, dict):
+            return "Tests Passed" if out.get("success") else f"Exit {out.get('exit_code', -1)}"
+        if r.tool_name == "read_project_log" and isinstance(out, dict):
+            errs = len(out.get('errors', []))
+            return f"{out.get('line_count', 0)} lines ({errs} errs)"
         if r.tool_name == "get_top_processes" and isinstance(out, list):
             return f"{len(out)} procs checked"
         if r.tool_name == "diagnose_system_bottleneck" and isinstance(out, dict):

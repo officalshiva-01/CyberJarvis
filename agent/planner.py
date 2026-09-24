@@ -96,10 +96,18 @@ def is_tool_relevant_to_request(tool_name: str, query: str) -> bool:
         ])
 
     # 5. Git tools
-    if tool_name in ("get_git_status", "get_git_recent_commits"):
+    if tool_name in ("get_git_status", "get_git_recent_commits", "git_status", "git_log"):
         return any(w in q for w in ["git", "branch", "commit", "working tree", "repo", "repository", "diff", "staged", "untracked"])
 
-    # 6. Action tools
+    # 6. Test & Project inspection tools
+    if tool_name in ("get_test_summary", "test_summary", "run_project_tests", "test_execution"):
+        return any(w in q for w in ["test", "tests", "pytest", "unit test", "suite", "fail", "failing", "assert", "debug", "error"])
+
+    # 7. Project log tools
+    if tool_name == "read_project_log":
+        return any(w in q for w in ["log", "logs", "error", "errors", "exception", "traceback", "debug", "issue", "problem"])
+
+    # 8. Action tools
     if tool_name in ("open_terminal", "open_browser", "launch_application"):
         return any(w in q for w in ["open", "launch", "start", "run application", "browser", "terminal"])
 

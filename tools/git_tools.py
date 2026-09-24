@@ -70,3 +70,30 @@ def get_git_recent_commits(limit: int = 5) -> List[Dict[str, Any]]:
         return commits
     except Exception as ex:
         return [{"error": f"Failed to get Git commits: {ex}"}]
+
+
+@registry.register(
+    name="git_status",
+    description="Get current Git branch and status (alias for get_git_status).",
+    parameters={},
+    permission_level=PermissionLevel.READ_ONLY,
+    is_read_only=True,
+    risk_level=RiskLevel.LOW,
+)
+def git_status() -> Dict[str, Any]:
+    return get_git_status()
+
+
+@registry.register(
+    name="git_log",
+    description="Get recent Git commit history (alias for get_git_recent_commits).",
+    parameters={
+        "limit": {"type": "integer", "description": "Number of commits to retrieve (default 5)", "default": 5},
+    },
+    permission_level=PermissionLevel.READ_ONLY,
+    is_read_only=True,
+    risk_level=RiskLevel.LOW,
+)
+def git_log(limit: int = 5) -> List[Dict[str, Any]]:
+    return get_git_recent_commits(limit=limit)
+

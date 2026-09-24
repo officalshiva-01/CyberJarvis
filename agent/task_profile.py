@@ -29,7 +29,73 @@ def classify_agent_task_profile(query: str) -> AgentTaskProfile:
 
     q = query.lower().strip()
 
-    # 1. PROJECT_ARCHITECTURE
+    # 1. DEPLOYMENT_PLANNING
+    # Examples:
+    # - "plan deployment for CyberJarvis"
+    # - "how should I deploy CyberJarvis"
+    # - "prepare CyberJarvis for Linux deployment"
+    # - "create a deployment architecture"
+    # - "plan a deployment architecture"
+    # - "deploy to aws", "deploy to kubernetes", "ecs deployment"
+    if any(p in q for p in [
+        "plan deployment", "plan a deployment", "how should i deploy", "how to deploy",
+        "prepare cyberjarvis for linux deployment", "prepare for deployment", "prepare deployment",
+        "deployment architecture", "deployment plan", "deployment planning",
+        "deploy to aws", "deploy to kubernetes", "deploy to docker", "ecs deployment",
+        "deployment to", "deploy cyberjarvis"
+    ]) or ("deploy" in q and any(w in q for w in ["cyberjarvis", "project", "architecture", "linux", "cloud", "plan"])):
+        logger.info(f"Agent Task Profile: DEPLOYMENT_PLANNING for query: '{query}'")
+        return AgentTaskProfile.DEPLOYMENT_PLANNING
+
+    # 2. PROJECT_DEBUGGING
+    # Examples:
+    # - "debug my CyberJarvis project"
+    # - "why are my tests failing"
+    # - "find the problem in my project"
+    # - "analyze this error"
+    # - "debug the current issue"
+    # - "diagnose a repository problem", "debug deadlock", "investigate error log"
+    if any(p in q for p in [
+        "debug my cyberjarvis", "debug cyberjarvis", "debug this project", "debug my project",
+        "debug the project", "debug project", "debug current issue", "debug the current issue",
+        "debug this issue", "debug issue", "why are my tests failing", "why are tests failing",
+        "tests failing", "test failing", "failing tests", "tests are failing", "tests broken",
+        "find the problem", "problem in my project", "problem in the project", "problem in this project",
+        "analyze this error", "analyze error", "debug this error", "debug error",
+        "diagnose a repository", "diagnose repository", "repository problem",
+        "debug deadlock", "diagnostic log", "deadlock in", "fix deadlock", "investigate error log",
+        "troubleshoot project", "troubleshoot my project", "find bug in project"
+    ]) or (re.search(r"\bdebug\b", q) and any(w in q for w in ["cyberjarvis", "project", "codebase", "issue", "error", "test", "repo", "repository"])):
+        logger.info(f"Agent Task Profile: PROJECT_DEBUGGING for query: '{query}'")
+        return AgentTaskProfile.PROJECT_DEBUGGING
+
+    # 3. PROJECT_INSPECTION
+    # Examples:
+    # - "inspect my CyberJarvis project"
+    # - "inspect my project"
+    # - "review my CyberJarvis codebase"
+    # - "show me the current project structure"
+    # - "review my repository"
+    # - "inspect files in this project", "show project structure", "explore codebase"
+    # Note: If it has "architecture" or "design", it belongs to PROJECT_ARCHITECTURE below.
+    has_arch_keyword = any(w in q for w in ["architecture", "design", "internals", "subsystem", "system design", "technical design"])
+
+    if not has_arch_keyword:
+        if any(p in q for p in [
+            "inspect my cyberjarvis project", "inspect cyberjarvis project", "inspect my project",
+            "inspect this project", "inspect the project", "inspect project", "inspect our project",
+            "review my cyberjarvis codebase", "review cyberjarvis codebase", "review my codebase",
+            "review the codebase", "review this codebase", "review our codebase",
+            "show me the current project structure", "show current project structure", "show project structure",
+            "current project structure", "project structure",
+            "review my repository", "review this repository", "review the repository", "review our repository",
+            "review repository", "inspect repository", "inspect my repository",
+            "inspect files", "list files in project", "show project files", "explore codebase", "browse project files"
+        ]):
+            logger.info(f"Agent Task Profile: PROJECT_INSPECTION for query: '{query}'")
+            return AgentTaskProfile.PROJECT_INSPECTION
+
+    # 4. PROJECT_ARCHITECTURE (Preserved)
     # At minimum recognizes:
     # - analyze my CyberJarvis architecture
     # - analyse my CyberJarvis architecture
@@ -57,7 +123,7 @@ def classify_agent_task_profile(query: str) -> AgentTaskProfile:
     has_arch_term = any(term in q for term in architecture_terms)
     has_project_ref = any(proj in q for proj in project_indicators)
 
-    # Patterns like "analyze my CyberJarvis architecture", "review my CyberJarvis design"
+    # Patterns like "analyze my CyberJarvis architecture", "review my CyberJarvis design", "analyze my CyberJarvis project"
     if has_action and has_project_ref and (has_arch_term or "project" in q):
         logger.info(f"Agent Task Profile: PROJECT_ARCHITECTURE for query: '{query}'")
         return AgentTaskProfile.PROJECT_ARCHITECTURE
@@ -66,31 +132,6 @@ def classify_agent_task_profile(query: str) -> AgentTaskProfile:
     if has_arch_term and has_project_ref:
         logger.info(f"Agent Task Profile: PROJECT_ARCHITECTURE for query: '{query}'")
         return AgentTaskProfile.PROJECT_ARCHITECTURE
-
-    # 2. PROJECT_INSPECTION (e.g. "inspect files in this project", "show project structure")
-    if any(p in q for p in [
-        "inspect files", "list files in project", "show project files",
-        "explore codebase", "inspect repository", "browse project files"
-    ]):
-        logger.info(f"Agent Task Profile: PROJECT_INSPECTION for query: '{query}'")
-        return AgentTaskProfile.PROJECT_INSPECTION
-
-    # 3. PROJECT_DEBUGGING (e.g. "debug this repository problem", "diagnose a repository problem", "deadlock in diagnostic logs")
-    if any(p in q for p in [
-        "debug deadlock", "diagnostic log", "deadlock in", "fix deadlock",
-        "debug repository problem", "diagnose a repository", "diagnose repository",
-        "repository problem", "investigate error log"
-    ]):
-        logger.info(f"Agent Task Profile: PROJECT_DEBUGGING for query: '{query}'")
-        return AgentTaskProfile.PROJECT_DEBUGGING
-
-    # 4. DEPLOYMENT_PLANNING (e.g. "plan a deployment architecture", "plan deployment to AWS ECS")
-    if any(p in q for p in [
-        "plan a deployment", "plan deployment", "deploy to aws", "deploy to kubernetes",
-        "ecs deployment", "deployment to"
-    ]):
-        logger.info(f"Agent Task Profile: DEPLOYMENT_PLANNING for query: '{query}'")
-        return AgentTaskProfile.DEPLOYMENT_PLANNING
 
     # Default to open-ended general planning
     logger.info(f"Agent Task Profile: GENERAL_PLANNING for query: '{query}'")
