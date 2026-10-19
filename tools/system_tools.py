@@ -5,6 +5,7 @@ import datetime as dt
 import psutil
 
 from tools.registry import registry
+from tools.isolation import IsolationMode
 from security.policy import RiskLevel, PermissionLevel
 
 
@@ -15,6 +16,7 @@ from security.policy import RiskLevel, PermissionLevel
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.THREAD,
 )
 def get_cpu_usage() -> float:
     return float(psutil.cpu_percent(interval=0.5))
@@ -27,6 +29,7 @@ def get_cpu_usage() -> float:
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.THREAD,
 )
 def get_memory_usage() -> dict:
     mem = psutil.virtual_memory()
@@ -45,6 +48,7 @@ def get_memory_usage() -> dict:
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.THREAD,
 )
 def get_swap_usage() -> dict:
     swap = psutil.swap_memory()
@@ -63,6 +67,7 @@ def get_swap_usage() -> dict:
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.THREAD,
 )
 def get_disk_usage(path: str = "/") -> dict:
     disk = psutil.disk_usage(path)
@@ -82,6 +87,7 @@ def get_disk_usage(path: str = "/") -> dict:
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.THREAD,
 )
 def get_load_average() -> dict:
     try:
@@ -105,6 +111,7 @@ def get_load_average() -> dict:
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.THREAD,
 )
 def get_uptime() -> dict:
     boot_time = psutil.boot_time()
@@ -127,6 +134,7 @@ def get_uptime() -> dict:
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.THREAD,
 )
 def get_os_info() -> dict:
     return {
@@ -145,6 +153,7 @@ def get_os_info() -> dict:
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.THREAD,
 )
 def get_system_status() -> dict:
     return {

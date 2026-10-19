@@ -20,7 +20,7 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from config import PROJECT_ROOT, LOG_DIR
-from tools.schemas import ToolDefinition, ToolResult
+from tools.schemas import ToolDefinition, ToolResult, IsolationMode
 from tools.registry import ToolRegistry, registry
 from security.policy import SecurityPolicy, RiskLevel, PermissionLevel, is_arbitrary_shell_attempt
 from security.permissions import is_path_safe_for_project
@@ -651,6 +651,237 @@ class TestSecurityActionsAndPermissions(unittest.TestCase):
             self.assertFalse(res["success"])
             self.assertFalse(res["verified"])
             self.assertIn("invalid backup_name", res["error"].lower())
+
+    # -------------------------------------------------------------
+    # PHASE 8.2A: RELIABLE TOOL EXECUTION TIMEOUTS AND ISOLATION
+    # -------------------------------------------------------------
+    def test_phase82a_process_isolated_tool_times_out(self):
+        """A slow process-isolated tool is terminated when exceeding timeout and caller receives timeout within reasonable bounds."""
+        test_reg = ToolRegistry()
+
+        @test_reg.register(
+            name="slow_process_tool",
+            description="Tool that takes too long",
+            timeout=0.2,
+            isolation=IsolationMode.PROCESS,
+        )
+        def slow_proc():
+            time.sleep(2.0)
+            return {"status": "finished"}
+
+        t0 = time.time()
+        res = test_reg.execute("slow_process_tool")
+        elapsed = time.time() - t0
+
+        self.assertFalse(res.success)
+        self.assertFalse(res.verified)
+        self.assertIn("timed out after 0.2s", res.error)
+        self.assertLess(elapsed, 1.2, f"Execution took {elapsed}s, timeout did not bound execution promptly")
+
+    def test_phase82a_delayed_side_effect_prevented(self):
+        """A delayed side effect that would occur after timeout does not occur because worker process was terminated."""
+        test_reg = ToolRegistry()
+        marker_path = Path(self.tmp_dir.name) / "side_effect_marker.txt"
+
+        @test_reg.register(
+            name="delayed_side_effect_tool",
+            description="Attempts side effect after delay",
+            timeout=0.15,
+            isolation=IsolationMode.PROCESS,
+        )
+        def delayed_tool():
+            time.sleep(0.5)
+            marker_path.write_text("should_never_exist")
+            return {"done": True}
+
+        res = test_reg.execute("delayed_side_effect_tool")
+        self.assertFalse(res.success)
+        self.assertIn("timed out", res.error)
+
+        # Wait longer than the delay to ensure the worker process is dead and cannot write later
+        time.sleep(0.5)
+        self.assertFalse(marker_path.exists(), "Process isolation failed: delayed side effect occurred after timeout!")
+
+    def test_phase82a_child_processes_cleaned_up(self):
+        """Child processes are cleaned up when the isolated worker times out."""
+        import psutil
+        test_reg = ToolRegistry()
+        pid_file = Path(self.tmp_dir.name) / "child_pid.txt"
+
+        @test_reg.register(
+            name="spawning_process_tool",
+            description="Spawns a child process and hangs",
+            timeout=0.2,
+            isolation=IsolationMode.PROCESS,
+        )
+        def spawning_tool():
+            import subprocess
+            proc = subprocess.Popen(["sleep", "30"])
+            pid_file.write_text(str(proc.pid))
+            time.sleep(2.0)
+            return {"done": True}
+
+        res = test_reg.execute("spawning_process_tool")
+        self.assertFalse(res.success)
+        self.assertIn("timed out", res.error)
+
+        self.assertTrue(pid_file.exists(), "Child PID was not recorded")
+        child_pid = int(pid_file.read_text().strip())
+
+        # Give cleanup a moment and verify child process is not actively running
+        time.sleep(0.2)
+        is_running = False
+        try:
+            p = psutil.Process(child_pid)
+            is_running = p.is_running() and p.status() != psutil.STATUS_ZOMBIE
+        except psutil.NoSuchProcess:
+            is_running = False
+
+        self.assertFalse(is_running, f"Child process {child_pid} was not cleaned up on worker timeout!")
+
+    def test_phase82a_process_isolated_tool_success(self):
+        """A successful process-isolated tool returns its output correctly and is verified."""
+        test_reg = ToolRegistry()
+
+        @test_reg.register(
+            name="successful_proc_tool",
+            description="Returns dict result",
+            timeout=2.0,
+            isolation=IsolationMode.PROCESS,
+        )
+        def success_proc():
+            return {"status": "ok", "value": 12345}
+
+        res = test_reg.execute("successful_proc_tool")
+        self.assertTrue(res.success)
+        self.assertTrue(res.verified)
+        self.assertEqual(res.output, {"status": "ok", "value": 12345})
+        self.assertIsNone(res.error)
+
+    def test_phase82a_process_isolated_worker_exception(self):
+        """Worker exceptions produce a safe failed ToolResult without crashing caller."""
+        test_reg = ToolRegistry()
+
+        @test_reg.register(
+            name="failing_proc_tool",
+            description="Raises exception",
+            timeout=2.0,
+            isolation=IsolationMode.PROCESS,
+        )
+        def fail_proc():
+            raise ZeroDivisionError("division by zero inside isolated worker")
+
+        res = test_reg.execute("failing_proc_tool")
+        self.assertFalse(res.success)
+        self.assertFalse(res.verified)
+        self.assertIn("division by zero inside isolated worker", res.error)
+
+    def test_phase82a_thread_mode_compatible(self):
+        """Existing thread-mode behavior remains compatible for tools explicitly designated for it."""
+        test_reg = ToolRegistry()
+
+        @test_reg.register(
+            name="thread_tool",
+            description="Fast thread tool",
+            timeout=1.0,
+            isolation=IsolationMode.THREAD,
+        )
+        def thread_tool():
+            return {"thread_exec": True}
+
+        res = test_reg.execute("thread_tool")
+        self.assertTrue(res.success)
+        self.assertTrue(res.verified)
+        self.assertEqual(res.output, {"thread_exec": True})
+
+        # Thread timeout also works
+        @test_reg.register(
+            name="slow_thread_tool",
+            description="Slow thread tool",
+            timeout=0.1,
+            isolation=IsolationMode.THREAD,
+        )
+        def slow_thread():
+            time.sleep(0.3)
+            return {"done": True}
+
+        res_slow = test_reg.execute("slow_thread_tool")
+        self.assertFalse(res_slow.success)
+        self.assertIn("timed out after 0.1s", res_slow.error)
+
+    def test_phase82a_unsupported_isolation_mode_fails_closed(self):
+        """Unsupported isolation mode must fail closed and audit as BLOCKED."""
+        test_reg = ToolRegistry()
+
+        @test_reg.register(
+            name="unsupported_mode_tool",
+            description="Tool with invalid isolation mode",
+            isolation="container",
+        )
+        def bad_tool():
+            return {"status": "should_not_run"}
+
+        res = test_reg.execute("unsupported_mode_tool")
+        self.assertFalse(res.success)
+        self.assertFalse(res.verified)
+        self.assertIn("unsupported isolation mode", res.error.lower())
+
+        events = audit_logger.get_events(limit=5)
+        matching = [e for e in events if e.get("tool") == "unsupported_mode_tool" and e.get("confirmation_status") == "BLOCKED"]
+        self.assertGreater(len(matching), 0)
+        self.assertFalse(matching[-1]["success"])
+
+    def test_phase82a_confirmation_and_validation_before_isolated_execution(self):
+        """Validation and confirmation must occur and block before any worker process is created."""
+        test_reg = ToolRegistry()
+        ran_marker = Path(self.tmp_dir.name) / "ran_marker.txt"
+
+        @test_reg.register(
+            name="guarded_proc_tool",
+            description="Mutating tool needing confirmation and validation",
+            parameters={
+                "target_count": {"type": "integer", "required": True},
+            },
+            permission_level=PermissionLevel.MUTATING,
+            risk_level=RiskLevel.MEDIUM,
+            requires_confirmation=True,
+            isolation=IsolationMode.PROCESS,
+        )
+        def guarded_tool(target_count: int):
+            ran_marker.write_text("executed")
+            return {"count": target_count}
+
+        # 1. Validation failure: missing parameter -> worker must not run
+        res_missing = test_reg.execute("guarded_proc_tool", parameters={})
+        self.assertFalse(res_missing.success)
+        self.assertIn("missing required parameter", res_missing.error.lower())
+        self.assertFalse(ran_marker.exists())
+
+        # 2. Validation failure: invalid type -> worker must not run
+        res_type = test_reg.execute("guarded_proc_tool", parameters={"target_count": "not_an_int"})
+        self.assertFalse(res_type.success)
+        self.assertIn("expected integer", res_type.error.lower())
+        self.assertFalse(ran_marker.exists())
+
+        # 3. User rejects confirmation -> worker must not run
+        reject_handler = ConfirmationHandler(voice_prompt_fn=lambda p: False)
+        res_reject = test_reg.execute("guarded_proc_tool", parameters={"target_count": 5}, confirmation_handler=reject_handler)
+        self.assertFalse(res_reject.success)
+        self.assertIn("rejected by user", res_reject.error.lower())
+        self.assertFalse(ran_marker.exists())
+
+        # 4. User approves confirmation -> worker executes and succeeds
+        approve_handler = ConfirmationHandler(voice_prompt_fn=lambda p: True)
+        res_approve = test_reg.execute("guarded_proc_tool", parameters={"target_count": 5}, confirmation_handler=approve_handler)
+        self.assertTrue(res_approve.success)
+        self.assertTrue(ran_marker.exists())
+
+    def test_phase82a_all_production_tools_have_explicit_isolation_metadata(self):
+        """Every tool registered in the production registry has a valid IsolationMode."""
+        for name, entry in registry.tools.items():
+            meta = entry.definition
+            self.assertIn(meta.isolation, [IsolationMode.PROCESS, IsolationMode.THREAD],
+                          f"Tool '{name}' has invalid isolation mode '{meta.isolation}'")
 
 
 if __name__ == "__main__":

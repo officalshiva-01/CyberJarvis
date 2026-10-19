@@ -2,6 +2,7 @@ import psutil
 from typing import List, Dict, Any, Optional
 
 from tools.registry import registry
+from tools.isolation import IsolationMode
 from tools.system_tools import get_cpu_usage, get_memory_usage, get_swap_usage, get_disk_usage
 from security.policy import RiskLevel, PermissionLevel
 
@@ -16,6 +17,7 @@ from security.policy import RiskLevel, PermissionLevel
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.THREAD,
 )
 def get_top_processes(limit: int = 5, sort_by: str = "memory") -> List[Dict[str, Any]]:
     processes = []
@@ -45,6 +47,7 @@ def get_top_processes(limit: int = 5, sort_by: str = "memory") -> List[Dict[str,
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.THREAD,
 )
 def diagnose_system_bottleneck() -> Dict[str, Any]:
     cpu = get_cpu_usage()
@@ -128,6 +131,7 @@ def diagnose_system_bottleneck() -> Dict[str, Any]:
     timeout=10.0,
     requires_confirmation=False,
     reversible=True,
+    isolation=IsolationMode.THREAD,
 )
 def get_system_health() -> Dict[str, Any]:
     diag = diagnose_system_bottleneck()

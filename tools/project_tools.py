@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from tools.registry import registry
+from tools.isolation import IsolationMode
 from security.policy import RiskLevel, PermissionLevel
 from config import PROJECT_ROOT
 
@@ -15,6 +16,7 @@ from config import PROJECT_ROOT
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.THREAD,
 )
 def get_test_summary() -> Dict[str, Any]:
     tests_dir = PROJECT_ROOT / "tests"
@@ -37,6 +39,7 @@ def get_test_summary() -> Dict[str, Any]:
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.THREAD,
 )
 def test_summary() -> Dict[str, Any]:
     return get_test_summary()
@@ -55,6 +58,7 @@ def test_summary() -> Dict[str, Any]:
     timeout=60.0,
     requires_confirmation=False,
     reversible=True,
+    isolation=IsolationMode.PROCESS,
 )
 def run_project_tests(test_target: str = "", max_fail: int = 1) -> Dict[str, Any]:
     # 1. Validate max_fail: integer only, positive, bounded 1..10, reject booleans
@@ -218,6 +222,7 @@ def run_project_tests(test_target: str = "", max_fail: int = 1) -> Dict[str, Any
     timeout=60.0,
     requires_confirmation=False,
     reversible=True,
+    isolation=IsolationMode.PROCESS,
 )
 def run_tests(test_target: str = "", max_fail: int = 1) -> Dict[str, Any]:
     return run_project_tests(test_target=test_target, max_fail=max_fail)
@@ -236,6 +241,7 @@ def run_tests(test_target: str = "", max_fail: int = 1) -> Dict[str, Any]:
     timeout=60.0,
     requires_confirmation=False,
     reversible=True,
+    isolation=IsolationMode.PROCESS,
 )
 def test_execution(test_target: str = "", max_fail: int = 1) -> Dict[str, Any]:
     return run_project_tests(test_target=test_target, max_fail=max_fail)
@@ -250,6 +256,7 @@ def test_execution(test_target: str = "", max_fail: int = 1) -> Dict[str, Any]:
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.THREAD,
 )
 def read_project_log(lines: int = 50) -> Dict[str, Any]:
     from observability.logging import sanitize_data

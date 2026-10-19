@@ -1,9 +1,10 @@
 import time
 import inspect
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
-from typing import Callable, Dict, Any, Optional, List
+from typing import Callable, Dict, Any, Optional, List, Union
 
 from tools.schemas import ToolDefinition, ToolResult
+from tools.isolation import IsolationMode, execute_in_process, execute_in_thread
 from security.policy import RiskLevel, PermissionLevel, SecurityPolicy
 from security.confirmation import ConfirmationHandler
 from security.audit import audit_logger
@@ -45,6 +46,7 @@ class ToolRegistry:
         timeout: float = 10.0,
         requires_confirmation: Optional[bool] = None,
         reversible: bool = False,
+        isolation: Union[IsolationMode, str] = IsolationMode.PROCESS,
     ):
         def decorator(func: Callable):
             if requires_confirmation is None:
@@ -56,6 +58,16 @@ class ToolRegistry:
             else:
                 req_conf = bool(requires_confirmation)
 
+            if isinstance(isolation, str):
+                try:
+                    iso_val = IsolationMode(isolation.lower().strip())
+                except ValueError:
+                    iso_val = isolation  # Keep invalid value so execute() can fail closed!
+            elif isinstance(isolation, IsolationMode):
+                iso_val = isolation
+            else:
+                iso_val = str(isolation)
+
             tool_def = ToolDefinition(
                 name=name,
                 description=description,
@@ -66,11 +78,16 @@ class ToolRegistry:
                 timeout=timeout,
                 requires_confirmation=req_conf,
                 reversible=reversible,
+                isolation=iso_val,
             )
             self._tools[name] = RegisteredTool(definition=tool_def, func=func)
-            logger.debug(f"Registered tool '{name}' (risk={risk_level.value}, read_only={is_read_only}, timeout={timeout}s, confirm={req_conf})")
+            logger.debug(f"Registered tool '{name}' (risk={risk_level.value}, read_only={is_read_only}, timeout={timeout}s, confirm={req_conf}, isolation={iso_val})")
             return func
         return decorator
+
+    @property
+    def tools(self) -> Dict[str, RegisteredTool]:
+        return self._tools
 
     def get(self, name: str) -> Optional[RegisteredTool]:
         return self._tools.get(name)
@@ -85,6 +102,11 @@ class ToolRegistry:
         """Return formatted declarations for LLM prompt context."""
         declarations = []
         for name, tool in self._tools.items():
+            iso_str = (
+                tool.definition.isolation.value
+                if isinstance(tool.definition.isolation, IsolationMode)
+                else str(tool.definition.isolation)
+            )
             declarations.append({
                 "name": name,
                 "description": tool.definition.description,
@@ -92,6 +114,7 @@ class ToolRegistry:
                 "read_only": tool.definition.is_read_only,
                 "risk": tool.definition.risk_level.value,
                 "timeout": tool.definition.timeout,
+                "isolation": iso_str,
                 "requires_confirmation": tool.definition.requires_confirmation,
                 "reversible": tool.definition.reversible,
             })
@@ -238,53 +261,57 @@ class ToolRegistry:
                 )
             confirmation_status = "CONFIRMED"
 
-        # 3. Execute deterministic function with bounded timeout
+        # 3. Check isolation mode and fail closed on unsupported modes
+        isolation_val = getattr(tool.definition, "isolation", IsolationMode.PROCESS)
+        iso_str = (
+            isolation_val.value
+            if isinstance(isolation_val, IsolationMode)
+            else str(isolation_val).lower().strip()
+        )
+        if iso_str not in (IsolationMode.PROCESS.value, IsolationMode.THREAD.value):
+            err = f"Unsupported isolation mode '{isolation_val}' for tool '{tool_name}'. Allowed modes are 'process' and 'thread'."
+            audit_logger.log_event(
+                user_request=user_request,
+                tool=tool_name,
+                arguments=parameters,
+                permission_level=tool.definition.permission_level.value,
+                risk_level=tool.definition.risk_level.value,
+                confirmation_status="BLOCKED",
+                result=None,
+                duration_ms=0.0,
+                success=False,
+                error=err,
+            )
+            return ToolResult(
+                tool_name=tool_name,
+                success=False,
+                error=err,
+                duration_ms=0.0,
+                verified=False,
+            )
+
+        # 4. Execute deterministic function with bounded timeout under isolated boundary
         timeout_sec = getattr(tool.definition, "timeout", 10.0) or 10.0
-        start_time = time.perf_counter()
         try:
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(tool, **parameters)
-                output = future.result(timeout=timeout_sec)
-            duration_ms = (time.perf_counter() - start_time) * 1000
+            if iso_str == IsolationMode.PROCESS.value:
+                exec_ok, output, exec_err, duration_ms = execute_in_process(tool, parameters, timeout_sec)
+            else:
+                exec_ok, output, exec_err, duration_ms = execute_in_thread(tool, parameters, timeout_sec)
+        except Exception as runner_ex:
+            duration_ms = 0.0
+            exec_ok = False
+            output = None
+            exec_err = f"Isolation runner failure for '{tool_name}': {runner_ex}"
 
-            # 4. Result Verification
-            verified = True
-            success = True
-            if isinstance(output, dict):
-                if "verified" in output:
-                    verified = bool(output["verified"])
-                if output.get("error") and not output.get("success"):
-                    success = False
-                elif "success" in output:
-                    success = bool(output["success"]) and verified
-                elif not verified:
-                    success = False
+        if not exec_ok:
+            is_timeout = "timed out after" in (exec_err or "")
+            if is_timeout:
+                err = f"Tool '{tool_name}' timed out after {timeout_sec}s."
+                logger.warning(err)
+            else:
+                err = exec_err or "Tool execution failed"
+                logger.error(f"Error executing tool '{tool_name}': {err}")
 
-            audit_logger.log_event(
-                user_request=user_request,
-                tool=tool_name,
-                arguments=parameters,
-                permission_level=tool.definition.permission_level.value,
-                risk_level=tool.definition.risk_level.value,
-                confirmation_status=confirmation_status,
-                result=output,
-                duration_ms=duration_ms,
-                success=success,
-                error=output.get("error") if isinstance(output, dict) else None,
-            )
-
-            return ToolResult(
-                tool_name=tool_name,
-                success=success,
-                output=output,
-                error=output.get("error") if (isinstance(output, dict) and not success) else None,
-                duration_ms=round(duration_ms, 2),
-                verified=verified,
-            )
-        except TimeoutError:
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            err = f"Tool '{tool_name}' timed out after {timeout_sec}s."
-            logger.warning(err)
             audit_logger.log_event(
                 user_request=user_request,
                 tool=tool_name,
@@ -304,28 +331,41 @@ class ToolRegistry:
                 duration_ms=round(duration_ms, 2),
                 verified=False,
             )
-        except Exception as ex:
-            duration_ms = (time.perf_counter() - start_time) * 1000
-            logger.error(f"Error executing tool '{tool_name}': {ex}", exc_info=True)
-            audit_logger.log_event(
-                user_request=user_request,
-                tool=tool_name,
-                arguments=parameters,
-                permission_level=tool.definition.permission_level.value,
-                risk_level=tool.definition.risk_level.value,
-                confirmation_status=confirmation_status,
-                result=None,
-                duration_ms=duration_ms,
-                success=False,
-                error=str(ex),
-            )
-            return ToolResult(
-                tool_name=tool_name,
-                success=False,
-                error=str(ex),
-                duration_ms=round(duration_ms, 2),
-                verified=False,
-            )
+
+        # 5. Result Verification
+        verified = True
+        success = True
+        if isinstance(output, dict):
+            if "verified" in output:
+                verified = bool(output["verified"])
+            if output.get("error") and not output.get("success"):
+                success = False
+            elif "success" in output:
+                success = bool(output["success"]) and verified
+            elif not verified:
+                success = False
+
+        audit_logger.log_event(
+            user_request=user_request,
+            tool=tool_name,
+            arguments=parameters,
+            permission_level=tool.definition.permission_level.value,
+            risk_level=tool.definition.risk_level.value,
+            confirmation_status=confirmation_status,
+            result=output,
+            duration_ms=duration_ms,
+            success=success,
+            error=output.get("error") if isinstance(output, dict) else None,
+        )
+
+        return ToolResult(
+            tool_name=tool_name,
+            success=success,
+            output=output,
+            error=output.get("error") if (isinstance(output, dict) and not success) else None,
+            duration_ms=round(duration_ms, 2),
+            verified=verified,
+        )
 
 
 # Global tool registry singleton

@@ -2,6 +2,7 @@ from typing import Dict, Any, List, Union
 from integrations.api_client import BaseApiClient, redact_secrets
 from config import GITHUB_TOKEN
 from tools.registry import registry
+from tools.schemas import IsolationMode
 from security.policy import RiskLevel, PermissionLevel
 
 DEFAULT_OWNER = "officialshiva-01"
@@ -110,6 +111,7 @@ github_client = GitHubClient()
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.PROCESS,
     timeout=10.0,
     requires_confirmation=False,
     reversible=True,
@@ -128,6 +130,7 @@ def get_repository(owner: str = DEFAULT_OWNER, repo: str = DEFAULT_REPO) -> Dict
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.PROCESS,
     timeout=10.0,
     requires_confirmation=False,
     reversible=True,
@@ -147,6 +150,7 @@ def get_repository_status(owner: str = DEFAULT_OWNER, repo: str = DEFAULT_REPO) 
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.PROCESS,
     timeout=10.0,
     requires_confirmation=False,
     reversible=True,
@@ -166,6 +170,7 @@ def get_recent_commits(owner: str = DEFAULT_OWNER, repo: str = DEFAULT_REPO, lim
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.PROCESS,
     timeout=10.0,
     requires_confirmation=False,
     reversible=True,
@@ -185,6 +190,7 @@ def get_github_repo_info(owner: str = DEFAULT_OWNER, repo: str = DEFAULT_REPO) -
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.PROCESS,
     timeout=10.0,
     requires_confirmation=False,
     reversible=True,

@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Dict, Any, List
 
 from tools.registry import registry
+from tools.isolation import IsolationMode
 from security.policy import RiskLevel, PermissionLevel
 from security.permissions import is_path_safe_for_project
 from config import PROJECT_ROOT, MAX_FILE_READ_CHARS
@@ -14,6 +15,7 @@ from config import PROJECT_ROOT, MAX_FILE_READ_CHARS
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.THREAD,
 )
 def list_project_files() -> List[Dict[str, Any]]:
     if not PROJECT_ROOT.exists():
@@ -39,6 +41,7 @@ def list_project_files() -> List[Dict[str, Any]]:
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.THREAD,
 )
 def read_project_file(filename: str) -> Dict[str, Any]:
     safe, reason = is_path_safe_for_project(filename)
@@ -81,6 +84,7 @@ def read_project_file(filename: str) -> Dict[str, Any]:
     timeout=10.0,
     requires_confirmation=True,
     reversible=False,
+    isolation=IsolationMode.PROCESS,
 )
 def write_project_file(filename: str, content: str) -> Dict[str, Any]:
     safe, reason = is_path_safe_for_project(filename)
@@ -126,6 +130,7 @@ def write_project_file(filename: str, content: str) -> Dict[str, Any]:
     timeout=10.0,
     requires_confirmation=True,
     reversible=False,
+    isolation=IsolationMode.PROCESS,
 )
 def delete_project_file(filename: str) -> Dict[str, Any]:
     safe, reason = is_path_safe_for_project(filename)

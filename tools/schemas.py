@@ -1,6 +1,7 @@
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
 from pydantic import BaseModel, Field
 from security.policy import RiskLevel, PermissionLevel
+from tools.isolation import IsolationMode
 
 
 class ToolParameter(BaseModel):
@@ -21,6 +22,7 @@ class ToolDefinition(BaseModel):
     timeout: float = 10.0
     requires_confirmation: bool = False
     reversible: bool = False
+    isolation: Union[IsolationMode, str] = IsolationMode.PROCESS
 
     @property
     def read_only(self) -> bool:
@@ -44,6 +46,7 @@ class ToolDefinition(BaseModel):
             "risk": self.risk,
             "risk_level": self.risk_level.value,
             "timeout": self.timeout,
+            "isolation": self.isolation.value if isinstance(self.isolation, IsolationMode) else str(self.isolation),
             "read_only": self.is_read_only,
             "requires_confirmation": self.requires_confirmation,
             "reversible": self.reversible,

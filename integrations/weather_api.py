@@ -2,6 +2,7 @@ import urllib.parse
 from typing import Dict, Any
 from integrations.api_client import BaseApiClient
 from tools.registry import registry
+from tools.schemas import IsolationMode
 from security.policy import RiskLevel, PermissionLevel
 from observability.logging import get_logger
 
@@ -71,6 +72,7 @@ weather_client = WeatherClient()
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.PROCESS,
     timeout=10.0,
     requires_confirmation=False,
     reversible=True,

@@ -3,6 +3,7 @@ import re
 import datetime as dt
 
 from tools.registry import registry
+from tools.isolation import IsolationMode
 from security.policy import RiskLevel, PermissionLevel
 
 SAFE_BACKUP_NAME_REGEX = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -16,6 +17,7 @@ MAX_BACKUP_NAME_LENGTH = 48
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.THREAD,
 )
 def get_time() -> str:
     return dt.datetime.now().strftime("%I:%M:%S %p")
@@ -28,6 +30,7 @@ def get_time() -> str:
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.THREAD,
 )
 def get_date() -> str:
     return dt.datetime.now().strftime("%A, %B %d, %Y")
@@ -43,6 +46,7 @@ def get_date() -> str:
     timeout=10.0,
     requires_confirmation=False,
     reversible=True,
+    isolation=IsolationMode.THREAD,
 )
 def get_current_directory() -> str:
     return os.getcwd()
@@ -60,6 +64,7 @@ def get_current_directory() -> str:
     timeout=30.0,
     requires_confirmation=True,
     reversible=False,
+    isolation=IsolationMode.PROCESS,
 )
 def create_project_backup(backup_name: str = "") -> dict:
     import tarfile
@@ -240,6 +245,7 @@ ALLOWED_SERVICES = {"ollama", "stt", "monitoring", "memory", "database", "cache"
     timeout=15.0,
     requires_confirmation=True,
     reversible=False,
+    isolation=IsolationMode.PROCESS,
 )
 def restart_project_service(service_name: str) -> dict:
     s_name = service_name.lower().strip()

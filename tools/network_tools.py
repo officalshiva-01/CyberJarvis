@@ -3,6 +3,7 @@ import psutil
 from typing import Dict, Any, List
 
 from tools.registry import registry
+from tools.schemas import IsolationMode
 from security.policy import RiskLevel, PermissionLevel
 
 
@@ -16,6 +17,7 @@ from security.policy import RiskLevel, PermissionLevel
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.PROCESS,
 )
 def check_network_connectivity(host: str = "1.1.1.1", port: int = 53) -> Dict[str, Any]:
     sock = None
@@ -51,6 +53,7 @@ def check_network_connectivity(host: str = "1.1.1.1", port: int = 53) -> Dict[st
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.PROCESS,
 )
 def check_dns_resolution(domain: str = "github.com") -> Dict[str, Any]:
     old_timeout = socket.getdefaulttimeout()
@@ -79,6 +82,7 @@ def check_dns_resolution(domain: str = "github.com") -> Dict[str, Any]:
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.THREAD,
 )
 def get_network_interfaces() -> List[Dict[str, Any]]:
     interfaces = []

@@ -2,6 +2,7 @@ import subprocess
 from typing import Dict, Any, List
 
 from tools.registry import registry
+from tools.schemas import IsolationMode
 from security.policy import RiskLevel, PermissionLevel
 from config import PROJECT_ROOT
 
@@ -26,6 +27,7 @@ def _run_git(args: List[str]) -> str:
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.PROCESS,
 )
 def get_git_status() -> Dict[str, Any]:
     try:
@@ -51,6 +53,7 @@ def get_git_status() -> Dict[str, Any]:
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.PROCESS,
     timeout=10.0,
     requires_confirmation=False,
     reversible=True,
@@ -82,6 +85,7 @@ def get_git_recent_commits(limit: int = 5) -> List[Dict[str, Any]]:
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.PROCESS,
     timeout=10.0,
     requires_confirmation=False,
     reversible=True,
@@ -99,6 +103,7 @@ def git_status() -> Dict[str, Any]:
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.PROCESS,
     timeout=10.0,
     requires_confirmation=False,
     reversible=True,
@@ -116,6 +121,7 @@ def git_recent_commits(limit: int = 5) -> List[Dict[str, Any]]:
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
     risk_level=RiskLevel.LOW,
+    isolation=IsolationMode.PROCESS,
     timeout=10.0,
     requires_confirmation=False,
     reversible=True,
