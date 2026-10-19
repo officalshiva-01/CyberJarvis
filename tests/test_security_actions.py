@@ -28,6 +28,9 @@ from security.confirmation import ConfirmationHandler, format_confirmation_promp
 from security.audit import AuditLogger, audit_logger
 from agent.gateway import AgentGateway, process_user_request
 from agent.task_profile import classify_agent_task_profile, AgentTaskProfile
+from tools.project_tools import run_project_tests, run_tests
+from tools.action_tools import create_project_backup
+from security.tool_validation import validate_tool_parameters
 
 
 class TestSecurityActionsAndPermissions(unittest.TestCase):
@@ -385,6 +388,271 @@ class TestSecurityActionsAndPermissions(unittest.TestCase):
         prompt = format_confirmation_prompt("create_project_backup", "mutating")
         self.assertEqual(prompt, "This will create a backup archive of ~/CyberJarvis. Proceed? [y/N]")
 
+    # -------------------------------------------------------------
+    # 11. PHASE 8.1 SECURITY HARDENING: PARAMETER VALIDATION & BOUNDARIES
+    # -------------------------------------------------------------
+    def test_phase81_a_unknown_parameter_rejected(self):
+        """A. Unknown / unexpected tool parameter is rejected before execution."""
+        res = registry.execute("run_tests", parameters={"unexpected_param": "bad_value"})
+        self.assertFalse(res.success)
+        self.assertFalse(res.verified)
+        self.assertTrue(
+            "unexpected" in res.error.lower() or "unknown" in res.error.lower(),
+            f"Error message should indicate unexpected parameter: {res.error}"
+        )
+        self.assertEqual(res.duration_ms, 0.0)
+
+        # Tool with zero parameters
+        res_zero = registry.execute("get_git_status", parameters={"extra": 123})
+        self.assertFalse(res_zero.success)
+        self.assertFalse(res_zero.verified)
+        self.assertTrue("unexpected" in res_zero.error.lower() or "unknown" in res_zero.error.lower())
+
+    def test_phase81_b_missing_required_parameter_rejected(self):
+        """B. Missing required parameter is rejected before execution."""
+        # write_project_file requires 'filename' and 'content'
+        res = registry.execute("write_project_file", parameters={"filename": "test.txt"})
+        self.assertFalse(res.success)
+        self.assertFalse(res.verified)
+        self.assertIn("missing required parameter", res.error.lower())
+        self.assertIn("content", res.error.lower())
+
+        # read_project_file requires 'filename'
+        res2 = registry.execute("read_project_file", parameters={})
+        self.assertFalse(res2.success)
+        self.assertFalse(res2.verified)
+        self.assertIn("missing required parameter", res2.error.lower())
+        self.assertIn("filename", res2.error.lower())
+
+    def test_phase81_c_wrong_parameter_type_rejected(self):
+        """C. Wrong parameter type is rejected before execution."""
+        # Integer expected, got string
+        res = registry.execute("run_project_tests", parameters={"max_fail": "not_an_int"})
+        self.assertFalse(res.success)
+        self.assertFalse(res.verified)
+        self.assertIn("expected integer", res.error.lower())
+
+        # Boolean masquerading as integer
+        res_bool = registry.execute("run_project_tests", parameters={"max_fail": True})
+        self.assertFalse(res_bool.success)
+        self.assertFalse(res_bool.verified)
+        self.assertIn("expected integer", res_bool.error.lower())
+
+        # String expected, got integer
+        res_str = registry.execute("read_project_file", parameters={"filename": 12345})
+        self.assertFalse(res_str.success)
+        self.assertFalse(res_str.verified)
+        self.assertIn("expected string", res_str.error.lower())
+
+    def test_phase81_d_valid_default_parameter_still_works(self):
+        """D. Valid default parameter still works when omitted."""
+        # get_git_recent_commits has default limit=5
+        res = registry.execute("get_git_recent_commits", parameters={})
+        self.assertTrue(res.success)
+        self.assertTrue(res.verified)
+        self.assertIsInstance(res.output, list)
+
+        # run_project_tests with empty params applies defaults test_target="" and max_fail=1
+        res_tests = registry.execute("run_project_tests", parameters={})
+        self.assertTrue(res_tests.success)
+        self.assertTrue(res_tests.verified)
+        self.assertEqual(res_tests.output.get("exit_code"), 0)
+
+    def test_phase81_e_validation_failure_audited_and_does_not_execute_tool(self):
+        """E. Validation failure is audited with BLOCKED and does not execute the tool or prompt confirmation."""
+        mock_handler = MagicMock()
+        mock_handler.confirm.side_effect = AssertionError("Confirmation handler must not be called on validation failure!")
+
+        # write_project_file is mutating and requires confirmation.
+        res = registry.execute(
+            tool_name="write_project_file",
+            parameters={"filename": "should_not_exist.txt", "unexpected_param": 999},
+            confirmation_handler=mock_handler,
+            user_request="write a file with bad params",
+        )
+        self.assertFalse(res.success)
+        self.assertFalse(res.verified)
+        mock_handler.confirm.assert_not_called()
+
+        bad_path = PROJECT_ROOT / "should_not_exist.txt"
+        self.assertFalse(bad_path.exists())
+
+        # Check audit logger event
+        events = audit_logger.get_events(limit=5)
+        matching = [e for e in events if e.get("tool") == "write_project_file" and e.get("confirmation_status") == "BLOCKED"]
+        self.assertGreater(len(matching), 0)
+        last_event = matching[-1]
+        self.assertEqual(last_event["confirmation_status"], "BLOCKED")
+        self.assertFalse(last_event["success"])
+
+    def test_phase81_f_test_target_outside_project_root_tests_rejected(self):
+        """F. test_target outside PROJECT_ROOT/tests is rejected."""
+        res = run_project_tests(test_target="main.py")
+        self.assertFalse(res["success"])
+        self.assertFalse(res["verified"])
+        self.assertIn("inside", res["error"].lower())
+
+        res2 = run_project_tests(test_target="security/policy.py")
+        self.assertFalse(res2["success"])
+        self.assertFalse(res2["verified"])
+        self.assertIn("inside", res2["error"].lower())
+
+    def test_phase81_g_test_target_using_parent_traversal_rejected(self):
+        """G. test_target using ../ traversal is rejected."""
+        traversal_targets = [
+            "../tests/test_agent_core.py",
+            "tests/../../etc/passwd",
+            "tests/../main.py",
+            "../../CyberJarvis/tests/test_agent_core.py",
+        ]
+        for target in traversal_targets:
+            res = run_project_tests(test_target=target)
+            self.assertFalse(res["success"], f"Target '{target}' should have failed.")
+            self.assertFalse(res["verified"])
+            self.assertTrue(
+                "traversal" in res["error"].lower() or "inside" in res["error"].lower(),
+                f"Error should mention traversal or inside: {res['error']}"
+            )
+
+    def test_phase81_h_test_target_absolute_external_path_rejected(self):
+        """H. test_target absolute external path is rejected."""
+        external_paths = [
+            "/etc/passwd",
+            "/tmp/test_exploit.py",
+            "/var/log/syslog",
+            str(Path.home()),
+        ]
+        for p in external_paths:
+            res = run_project_tests(test_target=p)
+            self.assertFalse(res["success"], f"External path '{p}' should have been rejected.")
+            self.assertFalse(res["verified"])
+            self.assertIn("inside", res["error"].lower())
+
+    def test_phase81_i_test_target_beginning_with_dash_rejected(self):
+        """I. test_target beginning with '-' is rejected."""
+        injection_targets = ["-v", "--capture=no", "-o", "--help", "-s"]
+        for inj in injection_targets:
+            res = run_project_tests(test_target=inj)
+            self.assertFalse(res["success"], f"Option injection '{inj}' should have been rejected.")
+            self.assertFalse(res["verified"])
+            self.assertTrue(
+                "-" in res["error"] or "option" in res["error"].lower(),
+                f"Expected error for '{inj}', got: {res['error']}"
+            )
+
+    def test_phase81_j_valid_tests_target_still_works(self):
+        """J. Valid tests/test_*.py target still works."""
+        res = run_project_tests(test_target="tests/test_security.py")
+        self.assertTrue(res["success"])
+        self.assertTrue(res["verified"])
+        self.assertEqual(res["exit_code"], 0)
+        self.assertIn("passed", res["stdout"])
+
+        # Relative to tests/
+        res2 = run_project_tests(test_target="test_security.py")
+        self.assertTrue(res2["success"])
+        self.assertTrue(res2["verified"])
+        self.assertEqual(res2["exit_code"], 0)
+
+    def test_phase81_k_max_fail_invalid_values_rejected(self):
+        """K. max_fail invalid values are rejected."""
+        invalid_max_fails = [0, -1, 11, 100, True, False, "1", 1.5]
+        for val in invalid_max_fails:
+            res = run_project_tests(test_target="", max_fail=val)
+            self.assertFalse(res["success"], f"Invalid max_fail '{val}' should have been rejected.")
+            self.assertFalse(res["verified"])
+            self.assertIn("max_fail", res["error"].lower())
+
+    def test_phase81_l_backup_name_with_traversal_rejected(self):
+        """L. backup_name with '../' is rejected."""
+        traversal_names = ["../escape", "foo/../../bar", "..", "...."]
+        for name in traversal_names:
+            res = create_project_backup(backup_name=name)
+            self.assertFalse(res["success"], f"Traversal name '{name}' should have been rejected.")
+            self.assertFalse(res["verified"])
+            self.assertIn("invalid backup_name", res["error"].lower())
+
+            # Via ToolRegistry.execute
+            approve_handler = ConfirmationHandler(voice_prompt_fn=lambda p: True)
+            res_reg = registry.execute(
+                "create_project_backup",
+                parameters={"backup_name": name},
+                confirmation_handler=approve_handler,
+            )
+            self.assertFalse(res_reg.success)
+            self.assertFalse(res_reg.verified)
+
+    def test_phase81_m_backup_name_with_slash_or_backslash_rejected(self):
+        """M. backup_name with '/' or '\\' is rejected."""
+        sep_names = ["sub/backup", "nested\\backup", "/absolute", "trailing/", "trailing\\"]
+        for name in sep_names:
+            res = create_project_backup(backup_name=name)
+            self.assertFalse(res["success"], f"Separator name '{name}' should have been rejected.")
+            self.assertFalse(res["verified"])
+            self.assertIn("invalid backup_name", res["error"].lower())
+
+    def test_phase81_n_backup_name_with_control_characters_rejected(self):
+        """N. backup_name with control characters is rejected."""
+        bad_names = ["test\x00backup", "test\nbackup", "test\rbackup", "test\tbackup", "test\x1fbackup", "test\x7fbackup"]
+        for name in bad_names:
+            res = create_project_backup(backup_name=name)
+            self.assertFalse(res["success"], f"Control char name should have been rejected.")
+            self.assertFalse(res["verified"])
+            self.assertIn("invalid backup_name", res["error"].lower())
+
+    def test_phase81_o_valid_backup_name_still_succeeds(self):
+        """O. Valid backup_name still succeeds."""
+        approve_handler = ConfirmationHandler(voice_prompt_fn=lambda p: True)
+        valid_names = ["phase81_valid_test", "v1.0-test", "backup.prod-1"]
+        for name in valid_names:
+            res = registry.execute(
+                tool_name="create_project_backup",
+                parameters={"backup_name": name},
+                confirmation_handler=approve_handler,
+            )
+            self.assertTrue(res.success, f"Valid name '{name}' should succeed, got error: {res.error}")
+            self.assertTrue(res.verified)
+            self.assertIn("backup_path", res.output)
+            b_path = Path(res.output["backup_path"])
+            self.assertTrue(b_path.is_file())
+            self.assertGreater(b_path.stat().st_size, 0)
+            try:
+                b_path.unlink()
+            except Exception:
+                pass
+
+    def test_phase81_p_existing_path_traversal_remains_passing(self):
+        """P. Existing path traversal & security tests remain passing."""
+        self.assertTrue(is_path_safe_for_project("main.py")[0])
+        self.assertFalse(is_path_safe_for_project("../../etc/passwd")[0])
+        self.assertFalse(is_path_safe_for_project("/etc/shadow")[0])
+        self.assertFalse(is_path_safe_for_project(".ssh/id_rsa")[0])
+
+    def test_phase81_secrets_not_leaked_in_validation_errors(self):
+        """Secrets must never be leaked in parameter validation errors."""
+        secret_token = "ghp_123456789012345678901234567890123456"
+        res = registry.execute("run_project_tests", parameters={"max_fail": secret_token})
+        self.assertFalse(res.success)
+        self.assertNotIn(secret_token, res.error)
+        self.assertIn("expected integer", res.error.lower())
+
+    def test_phase81_aliases_continue_to_work_with_validation(self):
+        """All tool aliases continue to work with parameter validation."""
+        aliases = ["run_tests", "test_execution", "git_status", "test_summary"]
+        for alias in aliases:
+            res = registry.execute(alias, parameters={})
+            self.assertTrue(res.success, f"Alias '{alias}' failed: {res.error}")
+            self.assertTrue(res.verified)
+
+    def test_phase81_empty_after_normalization_backup_name_rejected(self):
+        """backup_name that is whitespace only or dot only is rejected."""
+        for b_name in ["   ", "\t  \n", ".", ".."]:
+            res = create_project_backup(backup_name=b_name)
+            self.assertFalse(res["success"])
+            self.assertFalse(res["verified"])
+            self.assertIn("invalid backup_name", res["error"].lower())
+
 
 if __name__ == "__main__":
     unittest.main()
+

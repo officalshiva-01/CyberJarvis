@@ -1,8 +1,12 @@
 import os
+import re
 import datetime as dt
 
 from tools.registry import registry
 from security.policy import RiskLevel, PermissionLevel
+
+SAFE_BACKUP_NAME_REGEX = re.compile(r"^[A-Za-z0-9_.-]+$")
+MAX_BACKUP_NAME_LENGTH = 48
 
 
 @registry.register(
@@ -62,11 +66,74 @@ def create_project_backup(backup_name: str = "") -> dict:
     from pathlib import Path
     from config import PROJECT_ROOT
 
+    # 1. Type validation
+    if not isinstance(backup_name, str):
+        return {
+            "success": False,
+            "verified": False,
+            "error": f"Invalid backup_name: expected string, got {type(backup_name).__name__}.",
+        }
+
+    # 2. Identifier boundary checks
+    if backup_name == "":
+        suffix = ""
+    else:
+        name = backup_name.strip()
+        if not name:
+            return {
+                "success": False,
+                "verified": False,
+                "error": "Invalid backup_name: name cannot be empty or whitespace only.",
+            }
+
+        if len(name) > MAX_BACKUP_NAME_LENGTH:
+            return {
+                "success": False,
+                "verified": False,
+                "error": f"Invalid backup_name: exceeds maximum length of {MAX_BACKUP_NAME_LENGTH} characters.",
+            }
+
+        if "/" in name or "\\" in name:
+            return {
+                "success": False,
+                "verified": False,
+                "error": "Invalid backup_name: path separators ('/' or '\\') are not allowed.",
+            }
+
+        if ".." in name:
+            return {
+                "success": False,
+                "verified": False,
+                "error": "Invalid backup_name: path traversal ('..') is not allowed.",
+            }
+
+        if any(ord(c) < 32 or ord(c) == 127 for c in name) or "\x00" in name:
+            return {
+                "success": False,
+                "verified": False,
+                "error": "Invalid backup_name: control characters are not allowed.",
+            }
+
+        if name in (".", "..") or name.startswith("."):
+            return {
+                "success": False,
+                "verified": False,
+                "error": "Invalid backup_name: cannot be dot or start with a dot.",
+            }
+
+        if not SAFE_BACKUP_NAME_REGEX.match(name):
+            return {
+                "success": False,
+                "verified": False,
+                "error": f"Invalid backup_name '{name}': only alphanumeric characters, underscores, hyphens, and dots are allowed.",
+            }
+
+        suffix = f"_{name}"
+
     backups_dir = (PROJECT_ROOT / "backups").resolve()
     backups_dir.mkdir(parents=True, exist_ok=True)
 
     timestamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-    suffix = f"_{backup_name.strip()}" if backup_name.strip() else ""
     archive_name = f"cyberjarvis_backup_{timestamp}{suffix}.tar.gz"
     archive_path = backups_dir / archive_name
 

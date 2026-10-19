@@ -7,6 +7,7 @@ from tools.schemas import ToolDefinition, ToolResult
 from security.policy import RiskLevel, PermissionLevel, SecurityPolicy
 from security.confirmation import ConfirmationHandler
 from security.audit import audit_logger
+from security.tool_validation import validate_tool_parameters
 from observability.logging import get_logger
 
 logger = get_logger("CyberJarvis.ToolRegistry")
@@ -104,14 +105,14 @@ class ToolRegistry:
         confirmation_handler: Optional[ConfirmationHandler] = None,
         user_request: str = "",
     ) -> ToolResult:
-        parameters = parameters or {}
-        tool = self._tools.get(tool_name)
-        if not tool:
-            err = f"Unknown tool: '{tool_name}'"
+        if parameters is None:
+            raw_parameters: Dict[str, Any] = {}
+        elif not isinstance(parameters, dict):
+            err = f"Tool parameters for '{tool_name}' must be a dictionary, got {type(parameters).__name__}."
             audit_logger.log_event(
                 user_request=user_request,
                 tool=tool_name,
-                arguments=parameters,
+                arguments={"invalid_type": type(parameters).__name__},
                 permission_level="unknown",
                 risk_level="high",
                 confirmation_status="BLOCKED",
@@ -127,6 +128,56 @@ class ToolRegistry:
                 duration_ms=0.0,
                 verified=False,
             )
+        else:
+            raw_parameters = parameters
+
+        tool = self._tools.get(tool_name)
+        if not tool:
+            err = f"Unknown tool: '{tool_name}'"
+            audit_logger.log_event(
+                user_request=user_request,
+                tool=tool_name,
+                arguments=raw_parameters,
+                permission_level="unknown",
+                risk_level="high",
+                confirmation_status="BLOCKED",
+                result=None,
+                duration_ms=0.0,
+                success=False,
+                error=err,
+            )
+            return ToolResult(
+                tool_name=tool_name,
+                success=False,
+                error=err,
+                duration_ms=0.0,
+                verified=False,
+            )
+
+        # 0. Runtime parameter validation (happens BEFORE confirmation and BEFORE execution)
+        is_valid, validated_params, val_err = validate_tool_parameters(tool.definition, raw_parameters)
+        if not is_valid:
+            audit_logger.log_event(
+                user_request=user_request,
+                tool=tool_name,
+                arguments=raw_parameters,
+                permission_level=tool.definition.permission_level.value,
+                risk_level=tool.definition.risk_level.value,
+                confirmation_status="BLOCKED",
+                result=None,
+                duration_ms=0.0,
+                success=False,
+                error=val_err,
+            )
+            return ToolResult(
+                tool_name=tool_name,
+                success=False,
+                error=val_err,
+                duration_ms=0.0,
+                verified=False,
+            )
+
+        parameters = validated_params
 
         # 1. Security & Policy check
         sec_policy = policy or SecurityPolicy()

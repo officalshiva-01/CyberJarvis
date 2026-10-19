@@ -57,10 +57,119 @@ def test_summary() -> Dict[str, Any]:
     reversible=True,
 )
 def run_project_tests(test_target: str = "", max_fail: int = 1) -> Dict[str, Any]:
-    python_bin = sys.executable or "python"
-    target = test_target.strip() if test_target else "tests/test_agent_core.py"
+    # 1. Validate max_fail: integer only, positive, bounded 1..10, reject booleans
+    if isinstance(max_fail, bool) or not isinstance(max_fail, int):
+        return {
+            "target": str(test_target),
+            "exit_code": -1,
+            "success": False,
+            "error": f"Invalid max_fail '{max_fail}': must be an integer.",
+            "verified": False,
+        }
+    if max_fail < 1 or max_fail > 10:
+        return {
+            "target": str(test_target),
+            "exit_code": -1,
+            "success": False,
+            "error": f"Invalid max_fail '{max_fail}': must be between 1 and 10.",
+            "verified": False,
+        }
 
-    cmd = [python_bin, "-m", "pytest", target, "-q", f"--maxfail={max_fail}", "--tb=short"]
+    # 2. Validate test_target type
+    if not isinstance(test_target, str):
+        return {
+            "target": str(test_target),
+            "exit_code": -1,
+            "success": False,
+            "error": f"Invalid test_target: expected string, got {type(test_target).__name__}.",
+            "verified": False,
+        }
+
+    tests_root = (PROJECT_ROOT / "tests").resolve()
+    raw_target = test_target.strip()
+
+    if not raw_target:
+        # Preserve default target behavior when test_target is empty
+        target_str = "tests/test_agent_core.py"
+    else:
+        # Reject command-line options
+        if raw_target.startswith("-"):
+            return {
+                "target": raw_target,
+                "exit_code": -1,
+                "success": False,
+                "error": f"Invalid test_target '{raw_target}': command-line options starting with '-' are not allowed.",
+                "verified": False,
+            }
+
+        # Reject control characters or null bytes
+        if any(ord(c) < 32 or ord(c) == 127 for c in raw_target) or "\x00" in raw_target:
+            return {
+                "target": raw_target,
+                "exit_code": -1,
+                "success": False,
+                "error": "Invalid test_target: control characters are not allowed.",
+                "verified": False,
+            }
+
+        # Reject path traversal (e.g. ../)
+        path_obj = Path(raw_target)
+        if ".." in path_obj.parts or ".." in raw_target:
+            return {
+                "target": raw_target,
+                "exit_code": -1,
+                "success": False,
+                "error": f"Path traversal rejected in test_target: '{raw_target}'.",
+                "verified": False,
+            }
+
+        # Resolve path safely and check boundaries
+        if path_obj.is_absolute():
+            resolved = path_obj.resolve()
+        else:
+            if path_obj.parts and path_obj.parts[0] == "tests":
+                resolved = (PROJECT_ROOT / path_obj).resolve()
+            elif (PROJECT_ROOT / path_obj).exists():
+                resolved = (PROJECT_ROOT / path_obj).resolve()
+            elif (tests_root / path_obj).exists():
+                resolved = (tests_root / path_obj).resolve()
+            else:
+                resolved = (tests_root / path_obj).resolve()
+
+        if resolved != tests_root and tests_root not in resolved.parents:
+            return {
+                "target": raw_target,
+                "exit_code": -1,
+                "success": False,
+                "error": f"Invalid test_target '{raw_target}': target must reference a path inside {tests_root}.",
+                "verified": False,
+            }
+
+        if not resolved.exists():
+            return {
+                "target": raw_target,
+                "exit_code": -1,
+                "success": False,
+                "error": f"Test target '{raw_target}' not found: path does not exist.",
+                "verified": False,
+            }
+
+        if not (resolved.is_file() or resolved.is_dir()):
+            return {
+                "target": raw_target,
+                "exit_code": -1,
+                "success": False,
+                "error": f"Test target '{raw_target}' is neither a regular file nor a directory.",
+                "verified": False,
+            }
+
+        try:
+            target_str = str(resolved.relative_to(PROJECT_ROOT))
+        except ValueError:
+            target_str = str(resolved)
+
+    python_bin = sys.executable or "python"
+    cmd = [python_bin, "-m", "pytest", target_str, "-q", f"--maxfail={max_fail}", "--tb=short"]
     try:
         res = subprocess.run(
             cmd,
@@ -68,9 +177,10 @@ def run_project_tests(test_target: str = "", max_fail: int = 1) -> Dict[str, Any
             capture_output=True,
             text=True,
             timeout=50.0,
+            shell=False,
         )
         return {
-            "target": target,
+            "target": target_str,
             "exit_code": res.returncode,
             "success": res.returncode == 0,
             "stdout": res.stdout[-1000:].strip() if res.stdout else "",
@@ -79,7 +189,7 @@ def run_project_tests(test_target: str = "", max_fail: int = 1) -> Dict[str, Any
         }
     except subprocess.TimeoutExpired:
         return {
-            "target": target,
+            "target": target_str,
             "exit_code": -1,
             "success": False,
             "error": "Test run timed out after 50.0s",
@@ -87,7 +197,7 @@ def run_project_tests(test_target: str = "", max_fail: int = 1) -> Dict[str, Any
         }
     except Exception as ex:
         return {
-            "target": target,
+            "target": target_str,
             "exit_code": -1,
             "success": False,
             "error": str(ex),
@@ -100,6 +210,7 @@ def run_project_tests(test_target: str = "", max_fail: int = 1) -> Dict[str, Any
     description="Run automated pytest test suite in the CyberJarvis project.",
     parameters={
         "test_target": {"type": "string", "description": "Specific test file to run (default: test_agent_core.py)", "default": ""},
+        "max_fail": {"type": "integer", "description": "Maximum failures before stopping", "default": 1},
     },
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
@@ -108,8 +219,8 @@ def run_project_tests(test_target: str = "", max_fail: int = 1) -> Dict[str, Any
     requires_confirmation=False,
     reversible=True,
 )
-def run_tests(test_target: str = "") -> Dict[str, Any]:
-    return run_project_tests(test_target=test_target)
+def run_tests(test_target: str = "", max_fail: int = 1) -> Dict[str, Any]:
+    return run_project_tests(test_target=test_target, max_fail=max_fail)
 
 
 @registry.register(
@@ -117,6 +228,7 @@ def run_tests(test_target: str = "") -> Dict[str, Any]:
     description="Execute test runner (alias for run_project_tests).",
     parameters={
         "test_target": {"type": "string", "description": "Specific test file to run", "default": ""},
+        "max_fail": {"type": "integer", "description": "Maximum failures before stopping", "default": 1},
     },
     permission_level=PermissionLevel.READ_ONLY,
     is_read_only=True,
@@ -125,8 +237,8 @@ def run_tests(test_target: str = "") -> Dict[str, Any]:
     requires_confirmation=False,
     reversible=True,
 )
-def test_execution(test_target: str = "") -> Dict[str, Any]:
-    return run_project_tests(test_target=test_target)
+def test_execution(test_target: str = "", max_fail: int = 1) -> Dict[str, Any]:
+    return run_project_tests(test_target=test_target, max_fail=max_fail)
 
 
 @registry.register(
