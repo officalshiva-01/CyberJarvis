@@ -1,0 +1,19 @@
+services:
+  cyberjarvis:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cyberjarvis
+    stdin_open: true
+    tty: true
+    environment:
+      CYBERJARVIS_DB_PATH: /data/cyberjarvis.db
+      OLLAMA_HOST: http://host.docker.internal:11434
+      CYBERJARVIS_MODEL: phi3:mini
+    extra_hosts:
+          - "host.docker.internal:172.18.0.1"
+    volumes:
+      - cyberjarvis_data:/data
+
+volumes:
+  cyberjarvis_data:

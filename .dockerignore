@@ -1,0 +1,14 @@
+.git
+.venv
+__pycache__
+*.py[cod]
+*.db
+*.db-shm
+*.db-wal
+*.log
+logs/
+backups/
+*backup*
+.env
+*.swp
+*.code-workspace
