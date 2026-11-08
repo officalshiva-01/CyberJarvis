@@ -324,27 +324,28 @@ class TestAgentProjectArchitecture(unittest.TestCase):
 
         collector = ProjectContextCollector(timeout_seconds=0.05)
         start_t = time.perf_counter()
+
         with patch("agent.project_context.ollama.chat", side_effect=slow_ollama):
-            answer, spoken, duration_ms = collector.synthesize_architecture(
+            synth_res = collector.synthesize_architecture(
                 "analyze my CyberJarvis architecture"
             )
+
         elapsed = time.perf_counter() - start_t
 
-        # Must return quickly via timeout failsafe
-        self.assertLess(elapsed, 0.8, f"Synthesis failsafe took {elapsed:.2f}s, expected < 0.8s")
-
-        # Check telemetry attributes
-        self.assertEqual(getattr(answer, "status", None) or "TIMEOUT", "TIMEOUT")
-        synth_res = collector.synthesize_architecture("analyze my CyberJarvis architecture")
+        self.assertLess(elapsed, 0.8)
         self.assertEqual(synth_res.status, "TIMEOUT")
         self.assertTrue(synth_res.fallback_used)
 
-        # Grounded fallback report must be returned with all sections
+        answer = synth_res.answer
+        spoken = synth_res.spoken_summary
+
         self.assertIn("### Architecture Overview", answer)
         self.assertIn("### Request Flow", answer)
         self.assertIn("### Major Components", answer)
         self.assertIn("### Recommended Next Engineering Step", answer)
         self.assertTrue(bool(spoken))
+
+
 
     @patch("agent.project_context.ollama.chat")
     def test_gateway_timing_breakdown_includes_repo_scan_and_evidence(self, mock_chat):
@@ -383,3 +384,4 @@ class TestAgentProjectArchitecture(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
