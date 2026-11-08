@@ -1,19 +1,27 @@
 services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: cyberjarvis-ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+
   cyberjarvis:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: cyberjarvis
+    depends_on:
+      - ollama
     stdin_open: true
     tty: true
     environment:
       CYBERJARVIS_DB_PATH: /data/cyberjarvis.db
-      OLLAMA_HOST: http://host.docker.internal:11434
+      OLLAMA_HOST: http://ollama:11434
       CYBERJARVIS_MODEL: phi3:mini
-    extra_hosts:
-          - "host.docker.internal:172.18.0.1"
     volumes:
       - cyberjarvis_data:/data
 
 volumes:
   cyberjarvis_data:
+  ollama_data:
