@@ -59,8 +59,16 @@ class TestVoiceLatencyAndVAD(unittest.TestCase):
         self.assertEqual(selected["index"], 0)
         self.assertIn("ALC3246", selected["name"])
 
-    def test_microphone_selection_env_override(self):
+    @patch("sounddevice.query_devices")
+    def test_microphone_selection_env_override(self, mock_query):
         """CYBERJARVIS_AUDIO_DEVICE must explicitly override default selection."""
+        mock_query.return_value = [
+            {"name": f"Output {i}", "max_input_channels": 0, "default_samplerate": 48000}
+            for i in range(4)
+        ] + [
+            {"name": "CI test microphone", "max_input_channels": 1, "default_samplerate": 16000}
+        ]
+
         os.environ["CYBERJARVIS_AUDIO_DEVICE"] = "4"
         selected = AudioDeviceManager.select_input_device()
         self.assertIsNotNone(selected)

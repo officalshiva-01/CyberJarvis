@@ -54,7 +54,15 @@ class TestVoiceNextFix(unittest.TestCase):
         os.environ.pop("CYBERJARVIS_AUDIO_DEVICE", None)
 
     # 1. INPUT-DEVICE SELECTION
-    def test_input_device_selection_env_override(self):
+    @patch("sounddevice.query_devices")
+    def test_input_device_selection_env_override(self, mock_query):
+        mock_query.return_value = [
+            {"name": f"Output {i}", "max_input_channels": 0, "default_samplerate": 48000}
+            for i in range(4)
+        ] + [
+            {"name": "CI test microphone", "max_input_channels": 1, "default_samplerate": 16000}
+        ]
+
         os.environ["CYBERJARVIS_AUDIO_DEVICE"] = "4"
         selected = AudioDeviceManager.select_input_device()
         self.assertIsNotNone(selected)
